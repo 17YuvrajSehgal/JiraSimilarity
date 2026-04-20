@@ -243,5 +243,8 @@ def _report_to_dict(report) -> dict[str, object]:
         "mrr": report.mrr,
         "map_at_k": report.map_at_k,
         "recall_at_k": report.recall_at_k,
+        "precision_at_k": report.precision_at_k,
+        "ndcg_at_k": report.ndcg_at_k,
+        "hit_rate_at_k": report.hit_rate_at_k,
         "threshold_metrics": report.threshold_metrics,
     }

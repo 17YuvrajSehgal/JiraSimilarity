@@ -59,6 +59,9 @@ def _evaluation_to_dict(report: ModelEvaluation) -> dict:
         "mrr": report.mrr,
         "map_at_k": report.map_at_k,
         "recall_at_k": report.recall_at_k,
+        "precision_at_k": report.precision_at_k,
+        "ndcg_at_k": report.ndcg_at_k,
+        "hit_rate_at_k": report.hit_rate_at_k,
         "threshold_metrics": report.threshold_metrics,
     }
 
@@ -94,23 +97,44 @@ def _md_reasons(results: list[SearchResult]) -> str:
 def _md_evaluation_table(reports: list[ModelEvaluation]) -> str:
     if not reports:
         return "_No evaluations._\n"
-    # Collect all k values present
     k_values = sorted({k for r in reports for k in r.map_at_k})
-    header_k = " | ".join(f"MAP@{k}" for k in k_values)
-    recall_k = " | ".join(f"Recall@{k}" for k in k_values)
-    sep_k = " | ".join(["---"] * len(k_values))
-    lines = [
-        f"| Model | Task | Queries | MRR | {header_k} | {recall_k} |",
-        f"|-------|------|---------|-----|{sep_k}|{sep_k}|",
+
+    # ── Table 1: Ranking metrics ──────────────────────────────────────
+    sep = " | ".join(["---"] * len(k_values))
+    map_hdr = " | ".join(f"MAP@{k}" for k in k_values)
+    ndcg_hdr = " | ".join(f"NDCG@{k}" for k in k_values)
+    ranking_lines = [
+        f"| Model | Queries | MRR | {map_hdr} | {ndcg_hdr} |",
+        f"|-------|---------|-----|{sep}|{sep}|",
     ]
     for r in reports:
         maps = " | ".join(f"{r.map_at_k.get(k, 0):.4f}" for k in k_values)
-        recalls = " | ".join(f"{r.recall_at_k.get(k, 0):.4f}" for k in k_values)
-        lines.append(
-            f"| {r.model_name} | {r.task} | {r.queries_evaluated} "
-            f"| {r.mrr:.4f} | {maps} | {recalls} |"
+        ndcgs = " | ".join(f"{r.ndcg_at_k.get(k, 0):.4f}" for k in k_values)
+        ranking_lines.append(
+            f"| {r.model_name} | {r.queries_evaluated} | {r.mrr:.4f} | {maps} | {ndcgs} |"
         )
-    return "\n".join(lines) + "\n"
+
+    # ── Table 2: Retrieval quality metrics ────────────────────────────
+    p_hdr = " | ".join(f"P@{k}" for k in k_values)
+    r_hdr = " | ".join(f"Recall@{k}" for k in k_values)
+    hit_hdr = " | ".join(f"Hit@{k}" for k in k_values)
+    quality_lines = [
+        f"| Model | {p_hdr} | {r_hdr} | {hit_hdr} |",
+        f"|-------|{sep}|{sep}|{sep}|",
+    ]
+    for r in reports:
+        ps = " | ".join(f"{r.precision_at_k.get(k, 0):.4f}" for k in k_values)
+        rs = " | ".join(f"{r.recall_at_k.get(k, 0):.4f}" for k in k_values)
+        hits = " | ".join(f"{r.hit_rate_at_k.get(k, 0):.4f}" for k in k_values)
+        quality_lines.append(f"| {r.model_name} | {ps} | {rs} | {hits} |")
+
+    return (
+        "### Ranking Metrics\n\n"
+        + "\n".join(ranking_lines)
+        + "\n\n### Retrieval Quality Metrics\n\n"
+        + "\n".join(quality_lines)
+        + "\n"
+    )
 
 
 def _md_threshold_table(reports: list[ModelEvaluation]) -> str:

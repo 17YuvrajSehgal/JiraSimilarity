@@ -80,5 +80,8 @@ class ModelEvaluation:
     mrr: float
     map_at_k: dict[int, float]
     recall_at_k: dict[int, float]
+    precision_at_k: dict[int, float] = field(default_factory=dict)
+    ndcg_at_k: dict[int, float] = field(default_factory=dict)
+    hit_rate_at_k: dict[int, float] = field(default_factory=dict)
     threshold_metrics: dict[str, dict[str, float]] = field(default_factory=dict)
 

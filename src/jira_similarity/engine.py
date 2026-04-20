@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 
 from .domain import IssueDocument, IssueQuery, ModelEvaluation, SearchResult
 from .model_registry import build_model_catalog, build_runnable_pipeline_registry, resolve_model_names
@@ -185,6 +186,9 @@ class JiraSimilarityEngine:
             reciprocal_ranks: list[float] = []
             average_precisions: dict[int, list[float]] = {k: [] for k in top_k_values}
             recalls: dict[int, list[float]] = {k: [] for k in top_k_values}
+            precisions: dict[int, list[float]] = {k: [] for k in top_k_values}
+            ndcg_scores: dict[int, list[float]] = {k: [] for k in top_k_values}
+            hit_rates: dict[int, list[float]] = {k: [] for k in top_k_values}
             threshold_counts = {
                 "0.45": {"tp": 0, "fp": 0, "fn": 0},
                 "0.55": {"tp": 0, "fp": 0, "fn": 0},
@@ -202,6 +206,9 @@ class JiraSimilarityEngine:
                     top_ids = predicted_ids[:k]
                     recalls[k].append(self._recall_at_k(top_ids, relevant))
                     average_precisions[k].append(self._average_precision(top_ids, relevant))
+                    precisions[k].append(self._precision_at_k(predicted_ids, relevant, k))
+                    ndcg_scores[k].append(self._ndcg_at_k(predicted_ids, relevant, k))
+                    hit_rates[k].append(self._hit_rate_at_k(predicted_ids[:k], relevant))
 
                 if task == "duplicates":
                     for threshold, counts in threshold_counts.items():
@@ -229,17 +236,23 @@ class JiraSimilarityEngine:
                     mrr=round(self._mean(reciprocal_ranks), 6),
                     map_at_k={k: round(self._mean(values), 6) for k, values in average_precisions.items()},
                     recall_at_k={k: round(self._mean(values), 6) for k, values in recalls.items()},
+                    precision_at_k={k: round(self._mean(values), 6) for k, values in precisions.items()},
+                    ndcg_at_k={k: round(self._mean(values), 6) for k, values in ndcg_scores.items()},
+                    hit_rate_at_k={k: round(self._mean(values), 6) for k, values in hit_rates.items()},
                     threshold_metrics=self._threshold_metrics(threshold_counts) if task == "duplicates" else {},
                 )
             )
+            best_k = 10 if 10 in average_precisions else max(top_k_values)
             logger.info(
-                "Evaluation complete: model=%s task=%s queries=%s mrr=%.4f map@10=%.4f recall@10=%.4f",
-                model_name,
-                task,
-                len(query_ids),
+                "Evaluation complete: model=%s task=%s queries=%s mrr=%.4f "
+                "map@%s=%.4f recall@%s=%.4f p@%s=%.4f ndcg@%s=%.4f hit@%s=%.4f",
+                model_name, task, len(query_ids),
                 self._mean(reciprocal_ranks),
-                self._mean(average_precisions.get(10, average_precisions.get(max(top_k_values), []))),
-                self._mean(recalls.get(10, recalls.get(max(top_k_values), []))),
+                best_k, self._mean(average_precisions.get(best_k, [])),
+                best_k, self._mean(recalls.get(best_k, [])),
+                best_k, self._mean(precisions.get(best_k, [])),
+                best_k, self._mean(ndcg_scores.get(best_k, [])),
+                best_k, self._mean(hit_rates.get(best_k, [])),
             )
             logger.info("Finished evaluating model=%s task=%s", model_name, task)
         return reports
@@ -309,6 +322,33 @@ class JiraSimilarityEngine:
         if not values:
             return 0.0
         return sum(values) / len(values)
+
+    @staticmethod
+    def _precision_at_k(predicted_ids: list[int], relevant: set[int], k: int) -> float:
+        """Fraction of the top-k results that are relevant."""
+        if not relevant or k == 0:
+            return 0.0
+        hits = sum(1 for issue_id in predicted_ids[:k] if issue_id in relevant)
+        return hits / k
+
+    @staticmethod
+    def _ndcg_at_k(predicted_ids: list[int], relevant: set[int], k: int) -> float:
+        """Normalised Discounted Cumulative Gain at k (binary relevance)."""
+        if not relevant:
+            return 0.0
+        dcg = sum(
+            1.0 / math.log2(rank + 1)
+            for rank, issue_id in enumerate(predicted_ids[:k], start=1)
+            if issue_id in relevant
+        )
+        ideal_count = min(len(relevant), k)
+        idcg = sum(1.0 / math.log2(rank + 1) for rank in range(1, ideal_count + 1))
+        return dcg / idcg if idcg > 0 else 0.0
+
+    @staticmethod
+    def _hit_rate_at_k(predicted_ids: list[int], relevant: set[int]) -> float:
+        """1.0 if at least one relevant result appears in the predicted list, else 0.0."""
+        return 1.0 if any(issue_id in relevant for issue_id in predicted_ids) else 0.0
 
     @staticmethod
     def _threshold_metrics(counts_by_threshold: dict[str, dict[str, int]]) -> dict[str, dict[str, float]]:

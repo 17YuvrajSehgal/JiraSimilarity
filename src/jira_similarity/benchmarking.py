@@ -42,6 +42,9 @@ class BenchmarkRunResult:
                     "mrr": evaluation.mrr,
                     "map_at_k": evaluation.map_at_k,
                     "recall_at_k": evaluation.recall_at_k,
+                    "precision_at_k": evaluation.precision_at_k,
+                    "ndcg_at_k": evaluation.ndcg_at_k,
+                    "hit_rate_at_k": evaluation.hit_rate_at_k,
                     "threshold_metrics": evaluation.threshold_metrics,
                 }
                 for evaluation in self.evaluations
