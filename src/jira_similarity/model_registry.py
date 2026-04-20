@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import logging
 
 from .pipeline import RetrievalPipeline, build_pipeline_registry
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,6 +23,7 @@ class ModelSpec:
 
 
 def build_model_catalog() -> dict[str, ModelSpec]:
+    logger.debug("Building model catalog")
     return {
         "tfidf-cosine": ModelSpec(
             name="tfidf-cosine",
@@ -120,24 +124,37 @@ def build_runnable_pipeline_registry(
     holdout_issue_ids: frozenset[int] = frozenset(),
     compute_device: str = "auto",
 ) -> dict[str, RetrievalPipeline]:
+    logger.info(
+        "Building runnable pipeline registry: holdout_count=%s compute_device=%s",
+        len(holdout_issue_ids),
+        compute_device,
+    )
     pipelines = build_pipeline_registry(
         index,
         holdout_issue_ids=holdout_issue_ids,
         compute_device=compute_device,
     )
     catalog = build_model_catalog()
-    return {name: pipeline for name, pipeline in pipelines.items() if name in catalog}
+    runnable = {name: pipeline for name, pipeline in pipelines.items() if name in catalog}
+    logger.info(
+        "Runnable pipeline registry complete: total_built=%s runnable=%s",
+        len(pipelines),
+        len(runnable),
+    )
+    return runnable
 
 
 def resolve_model_names(requested: list[str] | tuple[str, ...] | None) -> list[str]:
     catalog = build_model_catalog()
     if not requested:
+        logger.debug("resolve_model_names: no names requested, returning all %s models", len(catalog))
         return [name for name in catalog]
 
     resolved: list[str] = []
     for name in requested:
         lowered = name.strip().lower()
         if lowered in {"all", "all-runnable", "*"}:
+            logger.debug("resolve_model_names: expanding wildcard '%s' to all %s models", name, len(catalog))
             resolved.extend(catalog)
             continue
         if lowered not in catalog:
@@ -151,4 +168,5 @@ def resolve_model_names(requested: list[str] | tuple[str, ...] | None) -> list[s
         if name not in seen:
             deduped.append(name)
             seen.add(name)
+    logger.debug("resolve_model_names: requested=%s resolved=%s", list(requested), deduped)
     return deduped

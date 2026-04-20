@@ -18,6 +18,12 @@ class JiraSimilarityEngine:
         candidate_pool_size: int = 250,
         compute_device: str = "auto",
     ):
+        logger.info(
+            "Initialising JiraSimilarityEngine: documents=%s candidate_pool_size=%s compute_device=%s",
+            len(documents),
+            candidate_pool_size,
+            compute_device,
+        )
         self._index = SearchIndex.build(documents)
         self._candidate_pool_size = candidate_pool_size
         self._compute_device = compute_device
@@ -114,8 +120,18 @@ class JiraSimilarityEngine:
         threshold: float = 0.55,
         top_k: int = 10,
     ) -> list[SearchResult]:
+        logger.debug(
+            "find_duplicates: model=%s threshold=%.2f top_k=%s", model_name, threshold, top_k
+        )
         results = self.search(query, model_name=model_name, top_k=top_k)
-        return [result for result in results if result.score >= threshold]
+        filtered = [result for result in results if result.score >= threshold]
+        logger.debug(
+            "find_duplicates: candidates=%s above_threshold=%s (threshold=%.2f)",
+            len(results),
+            len(filtered),
+            threshold,
+        )
+        return filtered
 
     def compare_models(
         self,
@@ -125,11 +141,19 @@ class JiraSimilarityEngine:
         top_k: int = 10,
     ) -> dict[str, list[SearchResult]]:
         resolved_model_names = resolve_model_names(model_names)
-        return {
+        logger.info(
+            "compare_models: running %s models top_k=%s: %s",
+            len(resolved_model_names),
+            top_k,
+            ", ".join(resolved_model_names),
+        )
+        results = {
             model_name: self.search(query, model_name=model_name, top_k=top_k)
             for model_name in resolved_model_names
             if model_name in self._pipelines
         }
+        logger.debug("compare_models: done, returned results for %s models", len(results))
+        return results
 
     def evaluate(
         self,
@@ -208,6 +232,15 @@ class JiraSimilarityEngine:
                     threshold_metrics=self._threshold_metrics(threshold_counts) if task == "duplicates" else {},
                 )
             )
+            logger.info(
+                "Evaluation complete: model=%s task=%s queries=%s mrr=%.4f map@10=%.4f recall@10=%.4f",
+                model_name,
+                task,
+                len(query_ids),
+                self._mean(reciprocal_ranks),
+                self._mean(average_precisions.get(10, average_precisions.get(max(top_k_values), []))),
+                self._mean(recalls.get(10, recalls.get(max(top_k_values), []))),
+            )
             logger.info("Finished evaluating model=%s task=%s", model_name, task)
         return reports
 
@@ -222,6 +255,11 @@ class JiraSimilarityEngine:
         if model_spec.family not in {"classical_supervised_ml", "deep_pairwise_duplicate_classification"}:
             return self.search(query_document, model_name=model_name, top_k=top_k)
 
+        logger.debug(
+            "_search_for_evaluation: using holdout mode for model=%s issue_id=%s",
+            model_name,
+            query_document.issue_id,
+        )
         pipeline = build_runnable_pipeline_registry(
             self._index,
             holdout_issue_ids=frozenset({query_document.issue_id}),

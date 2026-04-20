@@ -61,7 +61,7 @@ class SearchIndex:
             tfidf_vectors[issue_id] = vector
             tfidf_norms[issue_id] = math.sqrt(sum(weight * weight for weight in vector.values())) or 1.0
 
-        return cls(
+        index = cls(
             documents=document_map,
             prepared=prepared,
             doc_count=doc_count,
@@ -72,6 +72,15 @@ class SearchIndex:
             tfidf_vectors=tfidf_vectors,
             tfidf_norms=tfidf_norms,
         )
+        logger.info(
+            "SearchIndex built: docs=%s vocab=%s avg_doc_len=%.1f projects=%s",
+            index.doc_count,
+            len(index.document_frequency),
+            index.avg_doc_length,
+            len(index.project_index),
+        )
+        return index
+
 
     @staticmethod
     def _build_tfidf_vector(
@@ -176,12 +185,23 @@ class BM25CandidateGenerator(CandidateGenerator, CandidateGeneratorFallbackMixin
                 candidate_scores[issue_id] += idf * min(query_tf, 3) * min(candidate_tf, 3)
 
         if not candidate_scores:
+            logger.debug(
+                "BM25CandidateGenerator: no matches found, falling back to project/corpus index (pool_size=%s)",
+                pool_size,
+            )
             return self.fallback(query, index, pool_size)
 
-        return [
+        results = [
             CandidateMatch(issue_id=issue_id, seed_score=score)
             for issue_id, score in candidate_scores.most_common(pool_size)
         ]
+        logger.debug(
+            "BM25CandidateGenerator: scored=%s returning=%s top_score=%.4f",
+            len(candidate_scores),
+            len(results),
+            results[0].seed_score if results else 0.0,
+        )
+        return results
 
 
 class FeatureExtractor(ABC):
@@ -252,11 +272,17 @@ class WeightedLinearReranker(Reranker):
         if self._clamp_zero_one:
             score = max(0.0, min(1.0, score))
 
-        return RerankResult(
+        result = RerankResult(
             score=round(score, 6),
             feature_scores=feature_scores,
             reasons=self._build_reasons(feature_scores),
         )
+        logger.debug(
+            "WeightedLinearReranker: final_score=%.4f active_features=%s",
+            result.score,
+            [k for k, v in feature_scores.items() if v > 0],
+        )
+        return result
 
     def _build_reasons(self, feature_scores: dict[str, float]) -> tuple[str, ...]:
         templates = {

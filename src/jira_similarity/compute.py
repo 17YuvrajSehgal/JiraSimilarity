@@ -37,6 +37,7 @@ def _resolve_torch_runtime_cached(normalized_device: str) -> TorchRuntime:
     try:
         import torch  # type: ignore
     except ImportError:
+        logger.info("PyTorch is not installed — all model training will use pure-Python fallback")
         return TorchRuntime(
             torch=None,
             device="cpu",
@@ -45,6 +46,7 @@ def _resolve_torch_runtime_cached(normalized_device: str) -> TorchRuntime:
         )
 
     if normalized_device == "cpu":
+        logger.info("Compute device forced to CPU (torch available)")
         return TorchRuntime(
             torch=torch,
             device="cpu",
@@ -53,6 +55,11 @@ def _resolve_torch_runtime_cached(normalized_device: str) -> TorchRuntime:
         )
 
     if torch.cuda.is_available():
+        logger.info(
+            "CUDA is available — using GPU acceleration (torch=%s, cuda=%s)",
+            torch.__version__,
+            torch.version.cuda,
+        )
         return TorchRuntime(
             torch=torch,
             device="cuda",
@@ -62,6 +69,8 @@ def _resolve_torch_runtime_cached(normalized_device: str) -> TorchRuntime:
 
     if normalized_device == "cuda":
         logger.warning("CUDA requested but not available. Falling back to CPU.")
+    else:
+        logger.info("CUDA not available — using CPU (torch=%s)", torch.__version__)
     return TorchRuntime(
         torch=torch,
         device="cpu",
