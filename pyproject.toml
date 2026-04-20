@@ -16,6 +16,7 @@ dependencies = []
 [project.optional-dependencies]
 mysql = ["PyMySQL"]
 api = ["fastapi", "uvicorn"]
+gpu = ["torch>=2.2"]
 
 [project.scripts]
 jira-similarity = "jira_similarity.cli:main"

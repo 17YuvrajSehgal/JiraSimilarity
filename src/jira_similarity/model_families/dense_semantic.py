@@ -5,7 +5,9 @@ from dataclasses import dataclass
 import hashlib
 import logging
 import math
+from typing import Any
 
+from ..compute import resolve_torch_runtime
 from ..pipeline import (
     CandidateGenerator,
     CandidateGeneratorFallbackMixin,
@@ -50,6 +52,58 @@ class DenseEmbeddingSpace:
             for index, value in enumerate(token_vector):
                 accumulator[index] += value * weight
         return _normalize_vector(accumulator)
+
+
+@dataclass(slots=True)
+class TorchDenseIndex:
+    issue_ids: tuple[int, ...]
+    matrix: Any
+    torch: Any
+    device: str
+
+    @classmethod
+    def build(
+        cls,
+        dense_space: DenseEmbeddingSpace,
+        *,
+        compute_device: str,
+    ) -> "TorchDenseIndex | None":
+        runtime = resolve_torch_runtime(compute_device)
+        if not runtime.enabled or runtime.torch is None:
+            return None
+        if not dense_space.document_vectors:
+            return None
+
+        issue_ids = tuple(sorted(dense_space.document_vectors))
+        matrix_values = [dense_space.document_vectors[issue_id] for issue_id in issue_ids]
+        torch = runtime.torch
+        matrix = torch.tensor(matrix_values, dtype=torch.float32, device=runtime.device)
+        return cls(
+            issue_ids=issue_ids,
+            matrix=matrix,
+            torch=torch,
+            device=runtime.device,
+        )
+
+    def top_candidates(self, query_vector: tuple[float, ...], *, pool_size: int) -> list[CandidateMatch]:
+        with self.torch.no_grad():
+            query_tensor = self.torch.tensor(query_vector, dtype=self.torch.float32, device=self.device)
+            scores = self.matrix @ query_tensor
+            positive_mask = scores > 0
+            if not positive_mask.any():
+                return []
+
+            positive_indices = self.torch.nonzero(positive_mask, as_tuple=False).squeeze(1)
+            positive_scores = scores[positive_mask]
+            top_count = min(pool_size, int(positive_scores.shape[0]))
+            top_scores, top_positions = self.torch.topk(positive_scores, k=top_count)
+            selected_indices = positive_indices[top_positions].tolist()
+            selected_scores = top_scores.tolist()
+
+        return [
+            CandidateMatch(issue_id=self.issue_ids[int(index)], seed_score=float(score))
+            for index, score in zip(selected_indices, selected_scores)
+        ]
 
 
 def _dense_index_vector(token: str, dimensions: int, active_dimensions: int = 6) -> list[float]:
@@ -162,19 +216,30 @@ class RandomIndexingTrainer:
 
 
 class DenseSemanticCandidateGenerator(CandidateGenerator, CandidateGeneratorFallbackMixin):
-    def __init__(self, dense_space: DenseEmbeddingSpace):
+    def __init__(
+        self,
+        dense_space: DenseEmbeddingSpace,
+        *,
+        compute_device: str = "auto",
+    ):
         self._dense_space = dense_space
+        self._torch_index = TorchDenseIndex.build(dense_space, compute_device=compute_device)
+        if self._torch_index is not None:
+            logger.info("Dense semantic candidate scoring using torch on %s", self._torch_index.device)
 
     def generate(self, query, index: SearchIndex, *, pool_size: int) -> list[CandidateMatch]:
         query_vector = self._dense_space.encode(query.term_frequency, index.idf)
-        candidate_scores: list[CandidateMatch] = []
-        for issue_id, document_vector in self._dense_space.document_vectors.items():
-            score = _dense_cosine(query_vector, document_vector)
-            if score > 0:
-                candidate_scores.append(CandidateMatch(issue_id=issue_id, seed_score=score))
+        if self._torch_index is not None:
+            top_candidates = self._torch_index.top_candidates(query_vector, pool_size=pool_size)
+        else:
+            candidate_scores: list[CandidateMatch] = []
+            for issue_id, document_vector in self._dense_space.document_vectors.items():
+                score = _dense_cosine(query_vector, document_vector)
+                if score > 0:
+                    candidate_scores.append(CandidateMatch(issue_id=issue_id, seed_score=score))
+            candidate_scores.sort(key=lambda item: item.seed_score, reverse=True)
+            top_candidates = candidate_scores[:pool_size]
 
-        candidate_scores.sort(key=lambda item: item.seed_score, reverse=True)
-        top_candidates = candidate_scores[:pool_size]
         if not top_candidates:
             return self.fallback(query, index, pool_size)
         logger.debug(
@@ -218,7 +283,12 @@ class DenseCosineReranker(Reranker):
         )
 
 
-def build_dense_embedding_space(index: SearchIndex) -> DenseEmbeddingSpace:
+def build_dense_embedding_space(
+    index: SearchIndex,
+    *,
+    compute_device: str = "auto",
+) -> DenseEmbeddingSpace:
+    _ = compute_device
     return RandomIndexingTrainer().fit(index)
 
 
@@ -226,12 +296,16 @@ def build_dense_semantic_pipelines(
     index: SearchIndex,
     *,
     dense_space: DenseEmbeddingSpace | None = None,
+    compute_device: str = "auto",
 ) -> dict[str, RetrievalPipeline]:
-    effective_dense_space = dense_space or build_dense_embedding_space(index)
+    effective_dense_space = dense_space or build_dense_embedding_space(index, compute_device=compute_device)
     return {
         "random-indexing-dense": RetrievalPipeline(
             name="random-indexing-dense",
-            candidate_generator=DenseSemanticCandidateGenerator(effective_dense_space),
+            candidate_generator=DenseSemanticCandidateGenerator(
+                effective_dense_space,
+                compute_device=compute_device,
+            ),
             feature_extractor=DenseSemanticFeatureExtractor(effective_dense_space),
             reranker=DenseCosineReranker(),
         )

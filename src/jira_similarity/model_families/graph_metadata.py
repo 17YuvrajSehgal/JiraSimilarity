@@ -157,9 +157,13 @@ class GraphMetadataCandidateGenerator(CandidateGenerator):
         *,
         graph_space: GraphMetadataSpace,
         dense_space: DenseEmbeddingSpace,
+        compute_device: str = "auto",
     ):
         self._graph_space = graph_space
-        self._base_generator = ReciprocalRankFusionCandidateGenerator(dense_space=dense_space)
+        self._base_generator = ReciprocalRankFusionCandidateGenerator(
+            dense_space=dense_space,
+            compute_device=compute_device,
+        )
 
     def generate(self, query, index: SearchIndex, *, pool_size: int) -> list[CandidateMatch]:
         logger.debug("Graph-metadata candidate generation started: pool=%s", pool_size)
@@ -278,12 +282,17 @@ def build_graph_metadata_pipelines(
     index: SearchIndex,
     *,
     dense_space: DenseEmbeddingSpace,
+    compute_device: str = "auto",
 ) -> dict[str, RetrievalPipeline]:
     graph_space = GraphMetadataSpace.build(index)
     return {
         "graph-metadata-aware": RetrievalPipeline(
             name="graph-metadata-aware",
-            candidate_generator=GraphMetadataCandidateGenerator(graph_space=graph_space, dense_space=dense_space),
+            candidate_generator=GraphMetadataCandidateGenerator(
+                graph_space=graph_space,
+                dense_space=dense_space,
+                compute_device=compute_device,
+            ),
             feature_extractor=GraphMetadataFeatureExtractor(graph_space=graph_space, dense_space=dense_space),
             reranker=GraphMetadataReranker(),
         )

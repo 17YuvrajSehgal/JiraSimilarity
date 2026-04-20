@@ -32,7 +32,7 @@ def main() -> int:
         print(json.dumps(suites, indent=2))
         return 0
 
-    runtime = RuntimeConfig.from_env()
+    runtime = RuntimeConfig.from_env().with_overrides(compute_device=args.compute_device)
     source_config = SourceConfig.from_env().with_overrides(
         kind=args.source,
         json_path=args.json_path,
@@ -111,6 +111,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("DEBUG", "INFO", "WARNING", "ERROR"),
         default="INFO",
         help="Set application logging verbosity.",
+    )
+    parser.add_argument(
+        "--compute-device",
+        choices=("auto", "cpu", "cuda"),
+        help="Execution device for optional torch acceleration. Defaults to JIRA_COMPUTE_DEVICE or auto.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 

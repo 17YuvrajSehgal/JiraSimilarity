@@ -5,6 +5,7 @@ import logging
 import math
 import random
 
+from ..compute import resolve_torch_runtime
 from ..pipeline import (
     FeatureExtractor,
     RetrievalPipeline,
@@ -83,6 +84,21 @@ class MLPClassifierModel:
         return _sigmoid(output_activation)
 
 
+class TorchMLPClassifierModel:
+    def __init__(self, *, feature_names: tuple[str, ...], model, torch, device: str):
+        self.feature_names = feature_names
+        self._model = model
+        self._torch = torch
+        self._device = device
+
+    def predict_proba(self, features: dict[str, float]) -> float:
+        values = [features.get(name, 0.0) for name in self.feature_names]
+        with self._torch.no_grad():
+            inputs = self._torch.tensor(values, dtype=self._torch.float32, device=self._device).unsqueeze(0)
+            logits = self._model(inputs).squeeze(0).squeeze(0)
+            return float(self._torch.sigmoid(logits).item())
+
+
 class SimpleMLPTrainer:
     def __init__(
         self,
@@ -93,6 +109,7 @@ class SimpleMLPTrainer:
         epochs: int = 220,
         l2_penalty: float = 0.0005,
         seed: int = 13,
+        compute_device: str = "auto",
     ):
         self._feature_names = feature_names
         self._hidden_size = hidden_size
@@ -100,8 +117,9 @@ class SimpleMLPTrainer:
         self._epochs = epochs
         self._l2_penalty = l2_penalty
         self._seed = seed
+        self._compute_device = compute_device
 
-    def fit(self, examples: list[PairTrainingExample]) -> MLPClassifierModel:
+    def fit(self, examples: list[PairTrainingExample]):
         logger.info(
             "Training neural pairwise classifier: examples=%s hidden=%s epochs=%s lr=%.3f",
             len(examples),
@@ -112,6 +130,17 @@ class SimpleMLPTrainer:
         if not examples:
             return self._empty_model()
 
+        torch_runtime = resolve_torch_runtime(self._compute_device)
+        should_use_torch = (
+            torch_runtime.enabled
+            and torch_runtime.torch is not None
+            and (torch_runtime.device == "cuda" or self._compute_device == "cpu")
+        )
+        if should_use_torch:
+            return self._fit_torch(examples, torch_runtime)
+        return self._fit_python(examples)
+
+    def _fit_python(self, examples: list[PairTrainingExample]) -> MLPClassifierModel:
         rng = random.Random(self._seed)
         input_size = len(self._feature_names)
         input_hidden = [
@@ -181,6 +210,62 @@ class SimpleMLPTrainer:
             output_bias=output_bias,
         )
 
+    def _fit_torch(self, examples: list[PairTrainingExample], torch_runtime):
+        torch = torch_runtime.torch
+        device = torch_runtime.device
+        logger.info("Using torch-accelerated neural pairwise training on %s", device)
+
+        torch.manual_seed(self._seed)
+        if device == "cuda":
+            torch.cuda.manual_seed_all(self._seed)
+
+        feature_matrix = [
+            [example.features.get(name, 0.0) for name in self._feature_names]
+            for example in examples
+        ]
+        labels = [float(example.label) for example in examples]
+
+        inputs = torch.tensor(feature_matrix, dtype=torch.float32, device=device)
+        targets = torch.tensor(labels, dtype=torch.float32, device=device).unsqueeze(1)
+
+        model = torch.nn.Sequential(
+            torch.nn.Linear(len(self._feature_names), self._hidden_size),
+            torch.nn.ReLU(),
+            torch.nn.Linear(self._hidden_size, 1),
+        ).to(device)
+
+        optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=self._learning_rate,
+            weight_decay=self._l2_penalty,
+        )
+        loss_fn = torch.nn.BCEWithLogitsLoss()
+
+        model.train()
+        for epoch_index in range(1, self._epochs + 1):
+            optimizer.zero_grad()
+            logits = model(inputs)
+            loss = loss_fn(logits, targets)
+            loss.backward()
+            optimizer.step()
+
+            if epoch_index == 1 or epoch_index % 40 == 0 or epoch_index == self._epochs:
+                logger.debug(
+                    "Torch neural pairwise progress: epoch=%s/%s loss=%.4f",
+                    epoch_index,
+                    self._epochs,
+                    float(loss.item()),
+                )
+
+        model.eval()
+        logger.info("Torch neural pairwise training complete")
+        return TorchMLPClassifierModel(
+            feature_names=self._feature_names,
+            model=model,
+            torch=torch,
+            device=device,
+        )
+
     def _empty_model(self) -> MLPClassifierModel:
         input_size = len(self._feature_names)
         return MLPClassifierModel(
@@ -196,7 +281,7 @@ class SimpleMLPTrainer:
 class NeuralPairwiseReranker(Reranker):
     def __init__(
         self,
-        model: MLPClassifierModel,
+        model,
         *,
         explanation_threshold: float = 0.08,
     ):
@@ -242,11 +327,15 @@ def build_deep_pairwise_pipelines(
     *,
     dense_space: DenseEmbeddingSpace,
     holdout_issue_ids: frozenset[int] = frozenset(),
+    compute_device: str = "auto",
 ) -> dict[str, RetrievalPipeline]:
     logger.info("Building deep pairwise duplicate classification pipelines")
     feature_extractor = NeuralPairFeatureExtractor(dense_space)
-    candidate_generator = ReciprocalRankFusionCandidateGenerator(dense_space=dense_space)
-    trainer = SimpleMLPTrainer()
+    candidate_generator = ReciprocalRankFusionCandidateGenerator(
+        dense_space=dense_space,
+        compute_device=compute_device,
+    )
+    trainer = SimpleMLPTrainer(compute_device=compute_device)
     training_examples = PairTrainingSetBuilder(
         feature_extractor=feature_extractor,
         candidate_generator=candidate_generator,

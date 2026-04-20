@@ -58,6 +58,20 @@ If you want direct MySQL access through Python, install the optional dependency:
 .\.venv\Scripts\python.exe -m pip install -e .[mysql]
 ```
 
+If you want GPU acceleration (PyTorch-backed paths for dense scoring and model training), install:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e .[gpu]
+```
+
+The runtime supports both GPU and non-GPU machines:
+
+- `--compute-device auto` (default): use CUDA when available, otherwise CPU fallback
+- `--compute-device cuda`: request CUDA, fallback to CPU if unavailable
+- `--compute-device cpu`: force CPU
+
+You can also set `JIRA_COMPUTE_DEVICE` in the environment.
+
 Set database environment variables:
 
 ```powershell
@@ -94,6 +108,7 @@ Evaluate multiple models against linked issues already in the dataset:
 
 ```powershell
 .\.venv\Scripts\python.exe -m jira_similarity --log-level INFO evaluate `
+  --compute-device auto `
   --task duplicates `
   --models bm25 bm25-plus logreg-engineered random-indexing-dense hybrid-sparse-dense pairwise-neural-mlp rag-hybrid-judge graph-metadata-aware `
   --sample-size 100

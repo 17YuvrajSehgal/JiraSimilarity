@@ -16,10 +16,12 @@ class JiraSimilarityEngine:
         documents: list[IssueDocument],
         *,
         candidate_pool_size: int = 250,
+        compute_device: str = "auto",
     ):
         self._index = SearchIndex.build(documents)
         self._candidate_pool_size = candidate_pool_size
-        self._pipelines = build_runnable_pipeline_registry(self._index)
+        self._compute_device = compute_device
+        self._pipelines = build_runnable_pipeline_registry(self._index, compute_device=compute_device)
         self._model_catalog = build_model_catalog()
         logger.info("Jira similarity engine ready with pipelines: %s", ", ".join(sorted(self._pipelines)))
 
@@ -223,6 +225,7 @@ class JiraSimilarityEngine:
         pipeline = build_runnable_pipeline_registry(
             self._index,
             holdout_issue_ids=frozenset({query_document.issue_id}),
+            compute_device=self._compute_device,
         )[model_name]
         return self._run_pipeline(
             query_document,

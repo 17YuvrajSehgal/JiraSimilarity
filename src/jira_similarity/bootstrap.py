@@ -14,7 +14,11 @@ class SimilarityApplication:
 
     def build_engine(self) -> JiraSimilarityEngine:
         documents = self.repository.load_issues(self.runtime)
-        return JiraSimilarityEngine(documents, candidate_pool_size=self.runtime.candidate_pool_size)
+        return JiraSimilarityEngine(
+            documents,
+            candidate_pool_size=self.runtime.candidate_pool_size,
+            compute_device=self.runtime.compute_device,
+        )
 
 
 class ApplicationBuilder:

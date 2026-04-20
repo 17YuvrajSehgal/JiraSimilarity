@@ -161,12 +161,17 @@ def build_llm_rag_pipelines(
     index: SearchIndex,
     *,
     dense_space: DenseEmbeddingSpace,
+    compute_device: str = "auto",
 ) -> dict[str, RetrievalPipeline]:
+    _ = index
     logger.info("Building LLM-style RAG pipelines with local reasoning fallback")
     return {
         "rag-hybrid-judge": RetrievalPipeline(
             name="rag-hybrid-judge",
-            candidate_generator=ReciprocalRankFusionCandidateGenerator(dense_space=dense_space),
+            candidate_generator=ReciprocalRankFusionCandidateGenerator(
+                dense_space=dense_space,
+                compute_device=compute_device,
+            ),
             feature_extractor=RAGFeatureExtractor(dense_space),
             reranker=LocalRAGJudge(),
         )

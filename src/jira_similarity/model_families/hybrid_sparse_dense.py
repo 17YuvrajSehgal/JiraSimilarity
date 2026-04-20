@@ -22,12 +22,16 @@ class ReciprocalRankFusionCandidateGenerator(CandidateGenerator):
         self,
         *,
         dense_space: DenseEmbeddingSpace,
+        compute_device: str = "auto",
         sparse_weight: float = 0.55,
         dense_weight: float = 0.45,
         rank_constant: int = 60,
     ):
         self._sparse_generator = SparseScoreCandidateGenerator("bm25_plus")
-        self._dense_generator = DenseSemanticCandidateGenerator(dense_space)
+        self._dense_generator = DenseSemanticCandidateGenerator(
+            dense_space,
+            compute_device=compute_device,
+        )
         self._sparse_weight = sparse_weight
         self._dense_weight = dense_weight
         self._rank_constant = rank_constant
@@ -82,12 +86,17 @@ def build_hybrid_sparse_dense_pipelines(
     index: SearchIndex,
     *,
     dense_space: DenseEmbeddingSpace,
+    compute_device: str = "auto",
 ) -> dict[str, RetrievalPipeline]:
+    _ = index
     logger.info("Building hybrid sparse-dense pipelines")
     return {
         "hybrid-sparse-dense": RetrievalPipeline(
             name="hybrid-sparse-dense",
-            candidate_generator=ReciprocalRankFusionCandidateGenerator(dense_space=dense_space),
+            candidate_generator=ReciprocalRankFusionCandidateGenerator(
+                dense_space=dense_space,
+                compute_device=compute_device,
+            ),
             feature_extractor=HybridSparseDenseFeatureExtractor(dense_space),
             reranker=WeightedLinearReranker(
                 weights={

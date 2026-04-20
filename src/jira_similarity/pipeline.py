@@ -295,6 +295,7 @@ def build_pipeline_registry(
     index: SearchIndex,
     *,
     holdout_issue_ids: frozenset[int] = frozenset(),
+    compute_device: str = "auto",
 ) -> dict[str, RetrievalPipeline]:
     from .model_families.classical_supervised import build_classical_supervised_pipelines
     from .model_families.deep_pairwise import build_deep_pairwise_pipelines
@@ -308,18 +309,37 @@ def build_pipeline_registry(
     logger.info("Building sparse lexical pipelines")
     pipelines.update(build_sparse_lexical_pipelines())
     logger.info("Building classical supervised pipelines")
-    pipelines.update(build_classical_supervised_pipelines(index, holdout_issue_ids=holdout_issue_ids))
+    pipelines.update(
+        build_classical_supervised_pipelines(
+            index,
+            holdout_issue_ids=holdout_issue_ids,
+            compute_device=compute_device,
+        )
+    )
     logger.info("Training shared dense embedding space")
-    dense_space = build_dense_embedding_space(index)
+    dense_space = build_dense_embedding_space(index, compute_device=compute_device)
     logger.info("Building dense semantic pipelines")
-    pipelines.update(build_dense_semantic_pipelines(index, dense_space=dense_space))
+    pipelines.update(
+        build_dense_semantic_pipelines(index, dense_space=dense_space, compute_device=compute_device)
+    )
     logger.info("Building hybrid sparse-dense pipelines")
-    pipelines.update(build_hybrid_sparse_dense_pipelines(index, dense_space=dense_space))
+    pipelines.update(
+        build_hybrid_sparse_dense_pipelines(index, dense_space=dense_space, compute_device=compute_device)
+    )
     logger.info("Building deep pairwise duplicate classification pipelines")
-    pipelines.update(build_deep_pairwise_pipelines(index, dense_space=dense_space, holdout_issue_ids=holdout_issue_ids))
+    pipelines.update(
+        build_deep_pairwise_pipelines(
+            index,
+            dense_space=dense_space,
+            holdout_issue_ids=holdout_issue_ids,
+            compute_device=compute_device,
+        )
+    )
     logger.info("Building LLM-style RAG pipelines")
-    pipelines.update(build_llm_rag_pipelines(index, dense_space=dense_space))
+    pipelines.update(build_llm_rag_pipelines(index, dense_space=dense_space, compute_device=compute_device))
     logger.info("Building graph and metadata aware pipelines")
-    pipelines.update(build_graph_metadata_pipelines(index, dense_space=dense_space))
+    pipelines.update(
+        build_graph_metadata_pipelines(index, dense_space=dense_space, compute_device=compute_device)
+    )
     logger.info("Pipeline registry ready: %s", ", ".join(sorted(pipelines)))
     return pipelines

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import math
 import logging
 
+from ..compute import resolve_torch_runtime
 from ..pipeline import (
     BM25CandidateGenerator,
     CandidateMatch,
@@ -241,11 +242,13 @@ class LogisticRegressionTrainer:
         learning_rate: float = 0.6,
         epochs: int = 250,
         l2_penalty: float = 0.02,
+        compute_device: str = "auto",
     ):
         self._feature_names = feature_names
         self._learning_rate = learning_rate
         self._epochs = epochs
         self._l2_penalty = l2_penalty
+        self._compute_device = compute_device
 
     def fit(self, examples: list[PairTrainingExample]) -> LogisticRegressionModel:
         logger.info(
@@ -256,20 +259,36 @@ class LogisticRegressionTrainer:
             self._l2_penalty,
         )
         if not examples:
-            return LogisticRegressionModel(
-                feature_names=self._feature_names,
-                weights={name: 0.0 for name in self._feature_names},
-                bias=-1.5,
-            )
+            return self._empty_model(bias=-1.5)
 
         positive_count = sum(example.label for example in examples)
         negative_count = len(examples) - positive_count
         if positive_count == 0 or negative_count == 0:
-            return LogisticRegressionModel(
-                feature_names=self._feature_names,
-                weights={name: 0.0 for name in self._feature_names},
-                bias=0.0,
-            )
+            return self._empty_model(bias=0.0)
+
+        torch_runtime = resolve_torch_runtime(self._compute_device)
+        should_use_torch = (
+            torch_runtime.enabled
+            and torch_runtime.torch is not None
+            and (torch_runtime.device == "cuda" or self._compute_device == "cpu")
+        )
+        if should_use_torch:
+            return self._fit_torch(examples, positive_count, negative_count, torch_runtime)
+        return self._fit_python(examples, positive_count, negative_count)
+
+    def _empty_model(self, *, bias: float) -> LogisticRegressionModel:
+        return LogisticRegressionModel(
+            feature_names=self._feature_names,
+            weights={name: 0.0 for name in self._feature_names},
+            bias=bias,
+        )
+
+    def _fit_python(
+        self,
+        examples: list[PairTrainingExample],
+        positive_count: int,
+        negative_count: int,
+    ) -> LogisticRegressionModel:
 
         weights = {name: 0.0 for name in self._feature_names}
         bias = math.log(positive_count / negative_count)
@@ -300,6 +319,64 @@ class LogisticRegressionTrainer:
 
         logger.info("Logistic regression reranker training complete")
         return LogisticRegressionModel(feature_names=self._feature_names, weights=weights, bias=bias)
+
+    def _fit_torch(
+        self,
+        examples: list[PairTrainingExample],
+        positive_count: int,
+        negative_count: int,
+        torch_runtime,
+    ) -> LogisticRegressionModel:
+        torch = torch_runtime.torch
+        device = torch_runtime.device
+        logger.info("Using torch-accelerated logistic regression on %s", device)
+
+        feature_matrix = [
+            [example.features.get(name, 0.0) for name in self._feature_names]
+            for example in examples
+        ]
+        labels = [float(example.label) for example in examples]
+
+        inputs = torch.tensor(feature_matrix, dtype=torch.float32, device=device)
+        targets = torch.tensor(labels, dtype=torch.float32, device=device)
+        weights = torch.zeros(len(self._feature_names), dtype=torch.float32, device=device, requires_grad=True)
+        bias = torch.tensor(
+            math.log(positive_count / negative_count),
+            dtype=torch.float32,
+            device=device,
+            requires_grad=True,
+        )
+
+        optimizer = torch.optim.SGD(
+            [weights, bias],
+            lr=min(self._learning_rate, 0.08),
+            weight_decay=self._l2_penalty,
+        )
+        loss_fn = torch.nn.BCEWithLogitsLoss()
+
+        for epoch_index in range(1, self._epochs + 1):
+            optimizer.zero_grad()
+            logits = inputs @ weights + bias
+            loss = loss_fn(logits, targets)
+            loss.backward()
+            optimizer.step()
+
+            if epoch_index == 1 or epoch_index % 50 == 0 or epoch_index == self._epochs:
+                logger.debug(
+                    "Torch logistic regression progress: epoch=%s/%s loss=%.4f",
+                    epoch_index,
+                    self._epochs,
+                    float(loss.item()),
+                )
+
+        learned_weights = weights.detach().cpu().tolist()
+        learned_bias = float(bias.detach().cpu().item())
+        logger.info("Torch logistic regression training complete")
+        return LogisticRegressionModel(
+            feature_names=self._feature_names,
+            weights={name: float(value) for name, value in zip(self._feature_names, learned_weights)},
+            bias=learned_bias,
+        )
 
 
 class SupervisedLinearReranker(Reranker):
@@ -352,9 +429,10 @@ def build_classical_supervised_pipelines(
     index: SearchIndex,
     *,
     holdout_issue_ids: frozenset[int] = frozenset(),
+    compute_device: str = "auto",
 ) -> dict[str, RetrievalPipeline]:
     feature_extractor = EngineeredFeatureExtractor()
-    trainer = LogisticRegressionTrainer()
+    trainer = LogisticRegressionTrainer(compute_device=compute_device)
     training_examples = PairTrainingSetBuilder(feature_extractor=feature_extractor).build(
         index,
         holdout_issue_ids=holdout_issue_ids,

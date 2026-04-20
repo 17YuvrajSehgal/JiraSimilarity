@@ -78,6 +78,7 @@ class RuntimeConfig:
     max_comments_per_issue: int = 3
     candidate_pool_size: int = 250
     default_top_k: int = 10
+    compute_device: str = "auto"
 
     @classmethod
     def from_env(cls) -> "RuntimeConfig":
@@ -87,4 +88,19 @@ class RuntimeConfig:
             max_comments_per_issue=int(os.getenv("JIRA_MAX_COMMENTS", "3")),
             candidate_pool_size=int(os.getenv("JIRA_CANDIDATE_POOL", "250")),
             default_top_k=int(os.getenv("JIRA_TOP_K", "10")),
+            compute_device=os.getenv("JIRA_COMPUTE_DEVICE", "auto").strip().lower(),
+        )
+
+    def with_overrides(
+        self,
+        *,
+        compute_device: str | None = None,
+    ) -> "RuntimeConfig":
+        return RuntimeConfig(
+            load_limit=self.load_limit,
+            include_comments=self.include_comments,
+            max_comments_per_issue=self.max_comments_per_issue,
+            candidate_pool_size=self.candidate_pool_size,
+            default_top_k=self.default_top_k,
+            compute_device=(compute_device or self.compute_device).strip().lower(),
         )

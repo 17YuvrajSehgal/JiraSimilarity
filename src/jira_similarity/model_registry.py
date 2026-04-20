@@ -118,8 +118,13 @@ def build_runnable_pipeline_registry(
     index,
     *,
     holdout_issue_ids: frozenset[int] = frozenset(),
+    compute_device: str = "auto",
 ) -> dict[str, RetrievalPipeline]:
-    pipelines = build_pipeline_registry(index, holdout_issue_ids=holdout_issue_ids)
+    pipelines = build_pipeline_registry(
+        index,
+        holdout_issue_ids=holdout_issue_ids,
+        compute_device=compute_device,
+    )
     catalog = build_model_catalog()
     return {name: pipeline for name, pipeline in pipelines.items() if name in catalog}
 
