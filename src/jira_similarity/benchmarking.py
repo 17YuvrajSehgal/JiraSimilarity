@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import logging
 
 from .domain import ModelEvaluation
 from .engine import JiraSimilarityEngine
 from .model_registry import resolve_model_names
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,6 +159,13 @@ class BenchmarkRunner:
         top_k_values: tuple[int, ...] = (1, 3, 5, 10),
     ) -> BenchmarkRunResult:
         resolved_model_names = tuple(resolve_model_names(model_names))
+        logger.info(
+            "Running ad-hoc benchmark: task=%s models=%s sample_size=%s top_k_values=%s",
+            task,
+            ", ".join(resolved_model_names),
+            sample_size,
+            top_k_values,
+        )
         evaluations = tuple(
             self._engine.evaluate(
                 task=task,
@@ -164,7 +174,7 @@ class BenchmarkRunner:
                 top_k_values=top_k_values,
             )
         )
-        return BenchmarkRunResult(
+        result = BenchmarkRunResult(
             suite_name="ad-hoc",
             task=task,
             model_names=resolved_model_names,
@@ -172,6 +182,8 @@ class BenchmarkRunner:
             top_k_values=top_k_values,
             evaluations=evaluations,
         )
+        logger.info("Ad-hoc benchmark finished: evaluations=%s", len(evaluations))
+        return result
 
     def run_suite(
         self,
@@ -186,6 +198,14 @@ class BenchmarkRunner:
             available = ", ".join(sorted(self._suites))
             raise ValueError(f"Unknown benchmark suite '{suite_name}'. Available suites: {available}") from exc
 
+        logger.info(
+            "Running benchmark suite: suite=%s task=%s models=%s sample_size=%s top_k_values=%s",
+            suite.name,
+            suite.task,
+            ", ".join(suite.model_names),
+            sample_size,
+            top_k_values,
+        )
         evaluations = tuple(
             self._engine.evaluate(
                 task=suite.task,
@@ -194,7 +214,7 @@ class BenchmarkRunner:
                 top_k_values=top_k_values,
             )
         )
-        return BenchmarkRunResult(
+        result = BenchmarkRunResult(
             suite_name=suite.name,
             task=suite.task,
             model_names=suite.model_names,
@@ -202,3 +222,5 @@ class BenchmarkRunner:
             top_k_values=top_k_values,
             evaluations=evaluations,
         )
+        logger.info("Benchmark suite finished: suite=%s evaluations=%s", suite.name, len(evaluations))
+        return result

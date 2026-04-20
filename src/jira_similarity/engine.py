@@ -18,17 +18,24 @@ class JiraSimilarityEngine:
         *,
         candidate_pool_size: int = 250,
         compute_device: str = "auto",
+        eager_model_names: list[str] | tuple[str, ...] | None = None,
     ):
+        resolved_eager_models = resolve_model_names(eager_model_names) if eager_model_names else None
         logger.info(
-            "Initialising JiraSimilarityEngine: documents=%s candidate_pool_size=%s compute_device=%s",
+            "Initialising JiraSimilarityEngine: documents=%s candidate_pool_size=%s compute_device=%s eager_models=%s",
             len(documents),
             candidate_pool_size,
             compute_device,
+            resolved_eager_models if resolved_eager_models is not None else "all",
         )
         self._index = SearchIndex.build(documents)
         self._candidate_pool_size = candidate_pool_size
         self._compute_device = compute_device
-        self._pipelines = build_runnable_pipeline_registry(self._index, compute_device=compute_device)
+        self._pipelines = build_runnable_pipeline_registry(
+            self._index,
+            compute_device=compute_device,
+            requested_models=frozenset(resolved_eager_models) if resolved_eager_models is not None else None,
+        )
         self._model_catalog = build_model_catalog()
         logger.info("Jira similarity engine ready with pipelines: %s", ", ".join(sorted(self._pipelines)))
 
@@ -195,6 +202,7 @@ class JiraSimilarityEngine:
                 "0.65": {"tp": 0, "fp": 0, "fn": 0},
             }
 
+            progress_interval = 10 if len(query_ids) >= 30 else 5
             for query_id in query_ids:
                 query_document = self._index.documents[query_id]
                 relevant = label_map[query_id]
@@ -219,12 +227,13 @@ class JiraSimilarityEngine:
                         counts["fp"] += len(predicted_positive - relevant)
                         counts["fn"] += len(relevant - predicted_positive)
 
-                if len(reciprocal_ranks) % 25 == 0:
-                    logger.debug(
+                processed = len(reciprocal_ranks)
+                if processed % progress_interval == 0 or processed == len(query_ids):
+                    logger.info(
                         "Evaluation progress model=%s task=%s processed=%s/%s",
                         model_name,
                         task,
-                        len(reciprocal_ranks),
+                        processed,
                         len(query_ids),
                     )
 
@@ -277,6 +286,7 @@ class JiraSimilarityEngine:
             self._index,
             holdout_issue_ids=frozenset({query_document.issue_id}),
             compute_device=self._compute_device,
+            requested_models=frozenset({model_name}),
         )[model_name]
         return self._run_pipeline(
             query_document,

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import logging
 
 from .config import DatabaseConfig, RuntimeConfig, SourceConfig
+from .compute import resolve_torch_runtime
 from .engine import JiraSimilarityEngine
 from .repository import BaseIssueRepository, IssueRepositoryFactory
 
@@ -15,11 +16,12 @@ class SimilarityApplication:
     repository: BaseIssueRepository
     runtime: RuntimeConfig
 
-    def build_engine(self) -> JiraSimilarityEngine:
+    def build_engine(self, model_names: list[str] | tuple[str, ...] | None = None) -> JiraSimilarityEngine:
         logger.info(
-            "Loading issues from repository: candidate_pool_size=%s compute_device=%s",
+            "Loading issues from repository: candidate_pool_size=%s compute_device=%s target_models=%s",
             self.runtime.candidate_pool_size,
             self.runtime.compute_device,
+            list(model_names) if model_names else "all",
         )
         documents = self.repository.load_issues(self.runtime)
         logger.info("Building JiraSimilarityEngine with %s documents", len(documents))
@@ -27,6 +29,7 @@ class SimilarityApplication:
             documents,
             candidate_pool_size=self.runtime.candidate_pool_size,
             compute_device=self.runtime.compute_device,
+            eager_model_names=model_names,
         )
         logger.info("JiraSimilarityEngine is ready")
         return engine
@@ -45,6 +48,9 @@ class ApplicationBuilder:
         self._database_config = database_config
 
     def build(self) -> SimilarityApplication:
+        # Pre-warm TorchRuntime to eagerly log whether CUDA or CPU is being used.
+        resolve_torch_runtime(self._runtime_config.compute_device)
+
         logger.info(
             "ApplicationBuilder.build(): source_kind=%s compute_device=%s load_limit=%s",
             self._source_config.kind,

@@ -322,6 +322,7 @@ def build_pipeline_registry(
     *,
     holdout_issue_ids: frozenset[int] = frozenset(),
     compute_device: str = "auto",
+    requested_models: frozenset[str] | None = None,
 ) -> dict[str, RetrievalPipeline]:
     from .model_families.classical_supervised import build_classical_supervised_pipelines
     from .model_families.deep_pairwise import build_deep_pairwise_pipelines
@@ -331,41 +332,73 @@ def build_pipeline_registry(
     from .model_families.llm_rag import build_llm_rag_pipelines
     from .model_families.sparse_lexical import build_sparse_lexical_pipelines
 
+    def needs(any_of: frozenset[str]) -> bool:
+        return requested_models is None or bool(requested_models & any_of)
+
+    logger.info(
+        "Building pipeline registry: requested_models=%s holdout_count=%s compute_device=%s",
+        sorted(requested_models) if requested_models is not None else "all",
+        len(holdout_issue_ids),
+        compute_device,
+    )
+
+    sparse_models = frozenset({"tfidf-cosine", "bm25", "bm25-plus", "lexical"})
+    classical_models = frozenset({"logreg-engineered"})
+    dense_models = frozenset({"random-indexing-dense"})
+    hybrid_models = frozenset({"hybrid-sparse-dense"})
+    pairwise_models = frozenset({"pairwise-neural-mlp"})
+    rag_models = frozenset({"rag-hybrid-judge"})
+    graph_models = frozenset({"graph-metadata-aware"})
+
     pipelines: dict[str, RetrievalPipeline] = {}
-    logger.info("Building sparse lexical pipelines")
-    pipelines.update(build_sparse_lexical_pipelines())
-    logger.info("Building classical supervised pipelines")
-    pipelines.update(
-        build_classical_supervised_pipelines(
-            index,
-            holdout_issue_ids=holdout_issue_ids,
-            compute_device=compute_device,
+    if needs(sparse_models):
+        logger.info("Building sparse lexical pipelines")
+        pipelines.update(build_sparse_lexical_pipelines())
+
+    if needs(classical_models):
+        logger.info("Building classical supervised pipelines")
+        pipelines.update(
+            build_classical_supervised_pipelines(
+                index,
+                holdout_issue_ids=holdout_issue_ids,
+                compute_device=compute_device,
+            )
         )
-    )
-    logger.info("Training shared dense embedding space")
-    dense_space = build_dense_embedding_space(index, compute_device=compute_device)
-    logger.info("Building dense semantic pipelines")
-    pipelines.update(
-        build_dense_semantic_pipelines(index, dense_space=dense_space, compute_device=compute_device)
-    )
-    logger.info("Building hybrid sparse-dense pipelines")
-    pipelines.update(
-        build_hybrid_sparse_dense_pipelines(index, dense_space=dense_space, compute_device=compute_device)
-    )
-    logger.info("Building deep pairwise duplicate classification pipelines")
-    pipelines.update(
-        build_deep_pairwise_pipelines(
-            index,
-            dense_space=dense_space,
-            holdout_issue_ids=holdout_issue_ids,
-            compute_device=compute_device,
+
+    dense_space = None
+    needs_dense_space = needs(dense_models | hybrid_models | pairwise_models | rag_models | graph_models)
+    if needs_dense_space:
+        logger.info("Training shared dense embedding space")
+        dense_space = build_dense_embedding_space(index, compute_device=compute_device)
+
+    if needs(dense_models):
+        logger.info("Building dense semantic pipelines")
+        pipelines.update(
+            build_dense_semantic_pipelines(index, dense_space=dense_space, compute_device=compute_device)
         )
-    )
-    logger.info("Building LLM-style RAG pipelines")
-    pipelines.update(build_llm_rag_pipelines(index, dense_space=dense_space, compute_device=compute_device))
-    logger.info("Building graph and metadata aware pipelines")
-    pipelines.update(
-        build_graph_metadata_pipelines(index, dense_space=dense_space, compute_device=compute_device)
-    )
+    if needs(hybrid_models):
+        logger.info("Building hybrid sparse-dense pipelines")
+        pipelines.update(
+            build_hybrid_sparse_dense_pipelines(index, dense_space=dense_space, compute_device=compute_device)
+        )
+    if needs(pairwise_models):
+        logger.info("Building deep pairwise duplicate classification pipelines")
+        pipelines.update(
+            build_deep_pairwise_pipelines(
+                index,
+                dense_space=dense_space,
+                holdout_issue_ids=holdout_issue_ids,
+                compute_device=compute_device,
+            )
+        )
+    if needs(rag_models):
+        logger.info("Building LLM-style RAG pipelines")
+        pipelines.update(build_llm_rag_pipelines(index, dense_space=dense_space, compute_device=compute_device))
+    if needs(graph_models):
+        logger.info("Building graph and metadata aware pipelines")
+        pipelines.update(
+            build_graph_metadata_pipelines(index, dense_space=dense_space, compute_device=compute_device)
+        )
+
     logger.info("Pipeline registry ready: %s", ", ".join(sorted(pipelines)))
     return pipelines

@@ -123,16 +123,19 @@ def build_runnable_pipeline_registry(
     *,
     holdout_issue_ids: frozenset[int] = frozenset(),
     compute_device: str = "auto",
+    requested_models: frozenset[str] | None = None,
 ) -> dict[str, RetrievalPipeline]:
     logger.info(
-        "Building runnable pipeline registry: holdout_count=%s compute_device=%s",
+        "Building runnable pipeline registry: holdout_count=%s compute_device=%s requested=%s",
         len(holdout_issue_ids),
         compute_device,
+        sorted(requested_models) if requested_models is not None else "all",
     )
     pipelines = build_pipeline_registry(
         index,
         holdout_issue_ids=holdout_issue_ids,
         compute_device=compute_device,
+        requested_models=requested_models,
     )
     catalog = build_model_catalog()
     runnable = {name: pipeline for name, pipeline in pipelines.items() if name in catalog}

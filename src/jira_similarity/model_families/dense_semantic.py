@@ -177,8 +177,8 @@ class RandomIndexingTrainer:
                         for dimension, value in enumerate(neighbor_index_vector):
                             token_semantics[dimension] += value * weight
 
-                if document_position % 5000 == 0:
-                    logger.debug(
+                if document_position % 25000 == 0:
+                    logger.info(
                         "Dense semantic training progress: pass=%s documents=%s/%s",
                         pass_index + 1,
                         document_position,

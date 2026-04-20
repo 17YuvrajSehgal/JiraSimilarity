@@ -193,7 +193,7 @@ class SimpleMLPTrainer:
 
             if epoch_index == 1 or epoch_index % 40 == 0 or epoch_index == self._epochs:
                 mean_loss = total_loss / max(len(training_rows), 1)
-                logger.debug(
+                logger.info(
                     "Neural pairwise classifier progress: epoch=%s/%s loss=%.4f",
                     epoch_index,
                     self._epochs,
@@ -250,7 +250,7 @@ class SimpleMLPTrainer:
             optimizer.step()
 
             if epoch_index == 1 or epoch_index % 40 == 0 or epoch_index == self._epochs:
-                logger.debug(
+                logger.info(
                     "Torch neural pairwise progress: epoch=%s/%s loss=%.4f",
                     epoch_index,
                     self._epochs,

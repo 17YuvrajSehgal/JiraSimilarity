@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 from typing import Iterable
 
 from .benchmarking import BenchmarkRunner, build_benchmark_suites
@@ -12,11 +13,14 @@ from .logging_utils import configure_logging
 from .model_registry import build_model_catalog, resolve_model_names
 from .results import ResultsWriter
 
+logger = logging.getLogger(__name__)
+
 
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
     configure_logging(args.log_level)
+    logger.info("CLI command started: command=%s log_level=%s", args.command, args.log_level)
 
     if args.command == "models":
         catalog = build_model_catalog()
@@ -34,6 +38,8 @@ def main() -> int:
         return 0
 
     writer = ResultsWriter(args.results_dir) if not args.no_save else None
+    target_models = _resolve_target_models_for_engine(args, parser)
+    logger.info("Target models for this run: %s", target_models if target_models else "all")
 
     runtime = RuntimeConfig.from_env().with_overrides(compute_device=args.compute_device)
     source_config = SourceConfig.from_env().with_overrides(
@@ -45,7 +51,7 @@ def main() -> int:
         runtime_config=runtime,
         database_config=DatabaseConfig.from_env(),
     ).build()
-    engine = application.build_engine()
+    engine = application.build_engine(model_names=target_models)
     benchmark_runner = BenchmarkRunner(engine)
 
     if args.command == "benchmark":
@@ -126,6 +132,32 @@ def main() -> int:
 
     parser.error("Unknown command")
     return 2
+
+
+def _resolve_target_models_for_engine(
+    args: argparse.Namespace,
+    parser: argparse.ArgumentParser,
+) -> list[str] | None:
+    try:
+        if args.command in {"similar", "duplicates"}:
+            return resolve_model_names([args.model])
+        if args.command == "evaluate":
+            return resolve_model_names(args.models)
+        if args.command == "benchmark":
+            if args.suite:
+                suite = build_benchmark_suites().get(args.suite)
+                if suite is None:
+                    available = ", ".join(sorted(build_benchmark_suites()))
+                    parser.error(f"Unknown benchmark suite '{args.suite}'. Available suites: {available}")
+                return list(suite.model_names)
+            if not args.task:
+                parser.error("benchmark requires --task when --suite is not provided")
+            if args.models:
+                return resolve_model_names(args.models)
+        return None
+    except ValueError as exc:
+        parser.error(str(exc))
+    return None
 
 
 def build_parser() -> argparse.ArgumentParser:

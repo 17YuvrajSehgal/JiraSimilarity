@@ -134,7 +134,7 @@ class PairTrainingSetBuilder:
         examples: list[PairTrainingExample] = []
         fallback_negatives = self._sorted_issue_ids(index)
 
-        for issue_id in self._sorted_issue_ids(index):
+        for index_count, issue_id in enumerate(fallback_negatives, start=1):
             if issue_id in holdout_issue_ids:
                 continue
 
@@ -146,6 +146,9 @@ class PairTrainingSetBuilder:
             ]
             if not positive_targets:
                 continue
+
+            if index_count % 25000 == 0:
+                logger.info("PairTrainingSetBuilder: processed %s/%s issues...", index_count, len(fallback_negatives))
 
             candidate_matches = self._candidate_generator.generate(
                 query,
@@ -315,7 +318,7 @@ class LogisticRegressionTrainer:
                 weights[name] -= self._learning_rate * regularized_gradient
 
             if epoch_index == 1 or epoch_index % 50 == 0 or epoch_index == self._epochs:
-                logger.debug("Logistic regression training progress: epoch=%s/%s", epoch_index, self._epochs)
+                logger.info("Logistic regression training progress: epoch=%s/%s", epoch_index, self._epochs)
 
         logger.info("Logistic regression reranker training complete")
         return LogisticRegressionModel(feature_names=self._feature_names, weights=weights, bias=bias)
@@ -362,7 +365,7 @@ class LogisticRegressionTrainer:
             optimizer.step()
 
             if epoch_index == 1 or epoch_index % 50 == 0 or epoch_index == self._epochs:
-                logger.debug(
+                logger.info(
                     "Torch logistic regression progress: epoch=%s/%s loss=%.4f",
                     epoch_index,
                     self._epochs,
