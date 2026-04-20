@@ -10,6 +10,7 @@ from .config import DatabaseConfig, RuntimeConfig, SourceConfig
 from .domain import IssueQuery, SearchResult
 from .logging_utils import configure_logging
 from .model_registry import build_model_catalog, resolve_model_names
+from .results import ResultsWriter
 
 
 def main() -> int:
@@ -31,6 +32,8 @@ def main() -> int:
         suites = {name: suite.to_dict() for name, suite in build_benchmark_suites().items()}
         print(json.dumps(suites, indent=2))
         return 0
+
+    writer = ResultsWriter(args.results_dir) if not args.no_save else None
 
     runtime = RuntimeConfig.from_env().with_overrides(compute_device=args.compute_device)
     source_config = SourceConfig.from_env().with_overrides(
@@ -62,12 +65,27 @@ def main() -> int:
                 top_k_values=tuple(args.top_k_values),
             )
         print(json.dumps(result.to_dict(), indent=2))
+        if writer:
+            saved = writer.save_benchmark(
+                result,
+                suite_name=args.suite or "ad-hoc",
+                sample_size=args.sample_size,
+            )
+            print(f"\nResults saved to: {saved.parent}")
         return 0
 
     if args.command == "similar":
         query = build_query(args)
         results = engine.search(query, model_name=args.model, top_k=args.top_k)
         print(_render_results(results))
+        if writer:
+            saved = writer.save_search(
+                results,
+                command="similar",
+                model_name=args.model,
+                query_title=args.title,
+            )
+            print(f"\nResults saved to: {saved.parent}")
         return 0
 
     if args.command == "duplicates":
@@ -79,6 +97,14 @@ def main() -> int:
             top_k=args.top_k,
         )
         print(_render_results(results))
+        if writer:
+            saved = writer.save_search(
+                results,
+                command="duplicates",
+                model_name=args.model,
+                query_title=args.title,
+            )
+            print(f"\nResults saved to: {saved.parent}")
         return 0
 
     if args.command == "evaluate":
@@ -89,6 +115,13 @@ def main() -> int:
             top_k_values=tuple(args.top_k_values),
         )
         print(json.dumps([_report_to_dict(report) for report in reports], indent=2))
+        if writer:
+            saved = writer.save_evaluation(
+                reports,
+                task=args.task,
+                sample_size=args.sample_size,
+            )
+            print(f"\nResults saved to: {saved.parent}")
         return 0
 
     parser.error("Unknown command")
@@ -116,6 +149,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--compute-device",
         choices=("auto", "cpu", "cuda"),
         help="Execution device for optional torch acceleration. Defaults to JIRA_COMPUTE_DEVICE or auto.",
+    )
+    parser.add_argument(
+        "--results-dir",
+        default="results",
+        help="Directory where results are saved (default: ./results).",
+    )
+    parser.add_argument(
+        "--no-save",
+        action="store_true",
+        help="Disable saving results to disk (print only).",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
