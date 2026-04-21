@@ -7,6 +7,17 @@ from .pipeline import RetrievalPipeline, build_pipeline_registry
 
 logger = logging.getLogger(__name__)
 
+GPU_ACCELERATED_MODELS = frozenset(
+    {
+        "logreg-engineered",
+        "random-indexing-dense",
+        "hybrid-sparse-dense",
+        "pairwise-neural-mlp",
+        "rag-hybrid-judge",
+        "graph-metadata-aware",
+    }
+)
+
 
 @dataclass(frozen=True, slots=True)
 class ModelSpec:
@@ -173,3 +184,7 @@ def resolve_model_names(requested: list[str] | tuple[str, ...] | None) -> list[s
             seen.add(name)
     logger.debug("resolve_model_names: requested=%s resolved=%s", list(requested), deduped)
     return deduped
+
+
+def model_supports_gpu(model_name: str) -> bool:
+    return model_name in GPU_ACCELERATED_MODELS

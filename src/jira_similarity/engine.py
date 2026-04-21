@@ -3,8 +3,14 @@ from __future__ import annotations
 import logging
 import math
 
+from .compute import resolve_torch_runtime
 from .domain import IssueDocument, IssueQuery, ModelEvaluation, SearchResult
-from .model_registry import build_model_catalog, build_runnable_pipeline_registry, resolve_model_names
+from .model_registry import (
+    build_model_catalog,
+    build_runnable_pipeline_registry,
+    model_supports_gpu,
+    resolve_model_names,
+)
 from .pipeline import RetrievalPipeline, SearchIndex
 from .text import prepare_issue
 
@@ -37,6 +43,7 @@ class JiraSimilarityEngine:
             requested_models=frozenset(resolved_eager_models) if resolved_eager_models is not None else None,
         )
         self._model_catalog = build_model_catalog()
+        self._log_model_compute_plan()
         logger.info("Jira similarity engine ready with pipelines: %s", ", ".join(sorted(self._pipelines)))
 
     @property
@@ -294,6 +301,34 @@ class JiraSimilarityEngine:
             model_name=model_name,
             top_k=top_k,
         )
+
+    def _log_model_compute_plan(self) -> None:
+        runtime = resolve_torch_runtime(self._compute_device)
+        if self._compute_device == "cuda":
+            logger.info(
+                "Compute plan for CUDA request: torch_enabled=%s resolved_device=%s reason=%s",
+                runtime.enabled,
+                runtime.device,
+                runtime.reason,
+            )
+
+        for model_name in sorted(self._pipelines):
+            if model_supports_gpu(model_name):
+                if runtime.enabled and runtime.device == "cuda":
+                    logger.info("Model '%s': CUDA acceleration path is active.", model_name)
+                else:
+                    logger.info(
+                        "Model '%s': has optional GPU acceleration, running on %s (%s).",
+                        model_name,
+                        runtime.device,
+                        runtime.reason,
+                    )
+            else:
+                if self._compute_device == "cuda":
+                    logger.info(
+                        "Model '%s': CPU-only implementation (no CUDA kernels in current code).",
+                        model_name,
+                    )
 
     def _resolve_pipeline(self, model_name: str):
         try:

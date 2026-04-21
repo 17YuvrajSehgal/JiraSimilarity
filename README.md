@@ -135,6 +135,25 @@ Run the same engine against a JSON export instead of MySQL:
   --description "Checkout fails when customer profile is missing an address."
 ```
 
+Generate and use the built-in synthetic Jira-like JSON dataset (no MySQL required):
+
+```powershell
+python scripts\generate_synthetic_jira_dataset.py `
+  --output datasets\synthetic\synthetic_jira_issues.json `
+  --cluster-count 30 `
+  --seed 20260421
+
+.\.venv\Scripts\python.exe -m jira_similarity `
+  --source json `
+  --json-path datasets\synthetic\synthetic_jira_issues.json `
+  --compute-device auto `
+  benchmark `
+  --task similarity `
+  --models bm25 bm25-plus logreg-engineered random-indexing-dense hybrid-sparse-dense pairwise-neural-mlp rag-hybrid-judge graph-metadata-aware `
+  --sample-size 100 `
+  --top-k-values 1 3 5 10
+```
+
 Run a named benchmark suite:
 
 ```powershell
@@ -171,4 +190,5 @@ Use `--log-level DEBUG` when you want to see model-building and evaluation progr
 - Deep pairwise duplicate classification: [docs/deep-pairwise-duplicate-classification.md](/C:/workplace/JiraSimilarity/docs/deep-pairwise-duplicate-classification.md)
 - LLM-based and RAG-style approaches: [docs/llm-rag-style-approaches.md](/C:/workplace/JiraSimilarity/docs/llm-rag-style-approaches.md)
 - Graph- and metadata-aware models: [docs/graph-metadata-aware-models.md](/C:/workplace/JiraSimilarity/docs/graph-metadata-aware-models.md)
+- Synthetic dataset usage: [docs/synthetic-dataset.md](/C:/workplace/JiraSimilarity/docs/synthetic-dataset.md)
 - Broader future model ideas: [docs/various-ml-solutions.md](/C:/workplace/JiraSimilarity/docs/various-ml-solutions.md)

@@ -94,13 +94,17 @@ class RuntimeConfig:
     def with_overrides(
         self,
         *,
+        load_limit: int | None = None,
+        candidate_pool_size: int | None = None,
         compute_device: str | None = None,
     ) -> "RuntimeConfig":
         return RuntimeConfig(
-            load_limit=self.load_limit,
+            load_limit=load_limit if load_limit is not None else self.load_limit,
             include_comments=self.include_comments,
             max_comments_per_issue=self.max_comments_per_issue,
-            candidate_pool_size=self.candidate_pool_size,
+            candidate_pool_size=(
+                candidate_pool_size if candidate_pool_size is not None else self.candidate_pool_size
+            ),
             default_top_k=self.default_top_k,
             compute_device=(compute_device or self.compute_device).strip().lower(),
         )

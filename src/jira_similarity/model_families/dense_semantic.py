@@ -21,6 +21,7 @@ from ..pipeline import (
 )
 
 logger = logging.getLogger(__name__)
+TokenIndexEntries = tuple[tuple[int, float], ...]
 
 
 def _normalize_vector(values: list[float]) -> tuple[float, ...]:
@@ -106,23 +107,32 @@ class TorchDenseIndex:
         ]
 
 
-def _dense_index_vector(token: str, dimensions: int, active_dimensions: int = 6) -> list[float]:
+def _dense_index_entries(
+    token: str,
+    dimensions: int,
+    active_dimensions: int = 6,
+) -> TokenIndexEntries:
     digest = hashlib.blake2b(token.encode("utf-8"), digest_size=32).digest()
-    vector = [0.0] * dimensions
     cursor = 0
-    used_positions: set[int] = set()
+    entries: dict[int, float] = {}
 
-    while len(used_positions) < active_dimensions:
+    while len(entries) < active_dimensions:
         if cursor + 2 >= len(digest):
             digest = hashlib.blake2b(digest, digest_size=32).digest()
             cursor = 0
         position = int.from_bytes(digest[cursor : cursor + 2], "big") % dimensions
         sign = 1.0 if digest[cursor + 2] % 2 == 0 else -1.0
         cursor += 3
-        if position in used_positions:
+        if position in entries:
             continue
+        entries[position] = sign
+    return tuple(entries.items())
+
+
+def _dense_index_vector(token: str, dimensions: int, active_dimensions: int = 6) -> list[float]:
+    vector = [0.0] * dimensions
+    for position, sign in _dense_index_entries(token, dimensions, active_dimensions):
         vector[position] = sign
-        used_positions.add(position)
     return vector
 
 
@@ -135,12 +145,14 @@ class RandomIndexingTrainer:
         context_window: int = 2,
         passes: int = 2,
         lexical_mix: float = 0.25,
+        compute_device: str = "auto",
     ):
         self._dimensions = dimensions
         self._active_dimensions = active_dimensions
         self._context_window = context_window
         self._passes = passes
         self._lexical_mix = lexical_mix
+        self._compute_device = compute_device
 
     def fit(self, index: SearchIndex) -> DenseEmbeddingSpace:
         vocabulary = sorted(index.document_frequency)
@@ -151,9 +163,17 @@ class RandomIndexingTrainer:
             self._dimensions,
             self._passes,
         )
+        runtime = resolve_torch_runtime(self._compute_device)
+        if self._compute_device == "cuda":
+            logger.info(
+                "Random indexing training is CPU-bound in this implementation; "
+                "CUDA=%s (resolved_device=%s) will be used for torch scoring stages.",
+                runtime.enabled,
+                runtime.device,
+            )
 
-        index_vectors = {
-            token: _dense_index_vector(token, self._dimensions, self._active_dimensions)
+        index_entries = {
+            token: _dense_index_entries(token, self._dimensions, self._active_dimensions)
             for token in vocabulary
         }
         semantic_vectors = {token: [0.0] * self._dimensions for token in vocabulary}
@@ -173,8 +193,8 @@ class RandomIndexingTrainer:
                         neighbor = terms[neighbor_index]
                         distance = abs(neighbor_index - term_index)
                         weight = 1.0 / max(distance, 1)
-                        neighbor_index_vector = index_vectors[neighbor]
-                        for dimension, value in enumerate(neighbor_index_vector):
+                        neighbor_index_entries = index_entries[neighbor]
+                        for dimension, value in neighbor_index_entries:
                             token_semantics[dimension] += value * weight
 
                 if document_position % 25000 == 0:
@@ -188,10 +208,9 @@ class RandomIndexingTrainer:
 
         token_vectors: dict[str, tuple[float, ...]] = {}
         for token in vocabulary:
-            mixed = [
-                semantic_vectors[token][dimension] + (self._lexical_mix * index_vectors[token][dimension])
-                for dimension in range(self._dimensions)
-            ]
+            mixed = list(semantic_vectors[token])
+            for dimension, value in index_entries[token]:
+                mixed[dimension] += self._lexical_mix * value
             token_vectors[token] = _normalize_vector(mixed)
 
         dense_space = DenseEmbeddingSpace(
@@ -288,8 +307,7 @@ def build_dense_embedding_space(
     *,
     compute_device: str = "auto",
 ) -> DenseEmbeddingSpace:
-    _ = compute_device
-    return RandomIndexingTrainer().fit(index)
+    return RandomIndexingTrainer(compute_device=compute_device).fit(index)
 
 
 def build_dense_semantic_pipelines(

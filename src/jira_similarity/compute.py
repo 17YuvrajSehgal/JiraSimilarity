@@ -37,7 +37,12 @@ def _resolve_torch_runtime_cached(normalized_device: str) -> TorchRuntime:
     try:
         import torch  # type: ignore
     except ImportError:
-        logger.info("PyTorch is not installed - all model training will use pure-Python fallback")
+        if normalized_device == "cuda":
+            logger.warning(
+                "CUDA requested but PyTorch is not installed. Falling back to CPU-only execution."
+            )
+        else:
+            logger.info("PyTorch is not installed - all model training will use pure-Python fallback")
         return TorchRuntime(
             torch=None,
             device="cpu",

@@ -10,7 +10,7 @@ from .bootstrap import ApplicationBuilder
 from .config import DatabaseConfig, RuntimeConfig, SourceConfig
 from .domain import IssueQuery, SearchResult
 from .logging_utils import configure_logging
-from .model_registry import build_model_catalog, resolve_model_names
+from .model_registry import build_model_catalog, model_supports_gpu, resolve_model_names
 from .results import ResultsWriter
 
 logger = logging.getLogger(__name__)
@@ -40,8 +40,24 @@ def main() -> int:
     writer = ResultsWriter(args.results_dir) if not args.no_save else None
     target_models = _resolve_target_models_for_engine(args, parser)
     logger.info("Target models for this run: %s", target_models if target_models else "all")
+    if args.compute_device == "cuda" and target_models:
+        cpu_only_models = [name for name in target_models if not model_supports_gpu(name)]
+        if len(cpu_only_models) == len(target_models):
+            logger.warning(
+                "CUDA was requested, but all selected models are CPU-only: %s",
+                ", ".join(cpu_only_models),
+            )
+        elif cpu_only_models:
+            logger.warning(
+                "CUDA was requested. Some selected models are CPU-only: %s",
+                ", ".join(cpu_only_models),
+            )
 
     runtime = RuntimeConfig.from_env().with_overrides(compute_device=args.compute_device)
+    runtime = runtime.with_overrides(
+        load_limit=args.load_limit,
+        candidate_pool_size=args.candidate_pool_size,
+    )
     source_config = SourceConfig.from_env().with_overrides(
         kind=args.source,
         json_path=args.json_path,
@@ -181,6 +197,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--compute-device",
         choices=("auto", "cpu", "cuda"),
         help="Execution device for optional torch acceleration. Defaults to JIRA_COMPUTE_DEVICE or auto.",
+    )
+    parser.add_argument(
+        "--load-limit",
+        type=int,
+        help="Limit the number of issues loaded from the source (useful for faster benchmark/testing runs).",
+    )
+    parser.add_argument(
+        "--candidate-pool-size",
+        type=int,
+        help="Override candidate pool size (smaller values are faster, larger values can improve recall).",
     )
     parser.add_argument(
         "--results-dir",
