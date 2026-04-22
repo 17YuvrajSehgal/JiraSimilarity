@@ -37,6 +37,7 @@ ENGINEERED_FEATURE_NAMES = (
     "length_ratio",
     "candidate_seed",
 )
+CLASSICAL_SUPERVISED_RERANK_POOL_SIZE = 30
 
 
 def _sigmoid(value: float) -> float:
@@ -436,7 +437,10 @@ def build_classical_supervised_pipelines(
 ) -> dict[str, RetrievalPipeline]:
     feature_extractor = EngineeredFeatureExtractor()
     trainer = LogisticRegressionTrainer(compute_device=compute_device)
-    training_examples = PairTrainingSetBuilder(feature_extractor=feature_extractor).build(
+    training_examples = PairTrainingSetBuilder(
+        feature_extractor=feature_extractor,
+        hard_negative_pool_size=CLASSICAL_SUPERVISED_RERANK_POOL_SIZE,
+    ).build(
         index,
         holdout_issue_ids=holdout_issue_ids,
     )
@@ -448,5 +452,6 @@ def build_classical_supervised_pipelines(
             candidate_generator=BM25CandidateGenerator(),
             feature_extractor=feature_extractor,
             reranker=SupervisedLinearReranker(trained_model),
+            max_candidate_pool_size=CLASSICAL_SUPERVISED_RERANK_POOL_SIZE,
         )
     }

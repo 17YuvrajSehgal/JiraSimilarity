@@ -3,9 +3,11 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from dataclasses import replace
+import hashlib
 import json
 import logging
 from pathlib import Path
+import re
 from typing import Any
 
 from .config import DatabaseConfig, RuntimeConfig, SourceConfig
@@ -47,6 +49,61 @@ def _read_int_tuple(raw_value: Any) -> tuple[int, ...]:
         values = [int(item) for item in raw_value]
         return tuple(values)
     raise TypeError(f"Unsupported integer collection value: {type(raw_value)!r}")
+
+
+def _stable_int_from_text(value: str) -> int:
+    digest = hashlib.blake2b(value.encode("utf-8"), digest_size=8).digest()
+    return int.from_bytes(digest, "big")
+
+
+def _parse_issue_reference(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        if stripped.isdigit():
+            return int(stripped)
+        match = re.search(r"(\d+)$", stripped)
+        if match:
+            return int(match.group(1))
+        return _stable_int_from_text(stripped)
+    return None
+
+
+def _read_issue_reference_tuple(raw_value: Any) -> tuple[int, ...]:
+    if raw_value is None:
+        return ()
+
+    values: list[Any]
+    if isinstance(raw_value, str):
+        values = _split_grouped_values(raw_value) if "||" in raw_value else [raw_value]
+    elif isinstance(raw_value, (list, tuple, set)):
+        values = list(raw_value)
+    else:
+        raise TypeError(f"Unsupported issue reference collection value: {type(raw_value)!r}")
+
+    parsed: list[int] = []
+    for value in values:
+        parsed_value = _parse_issue_reference(value)
+        if parsed_value is not None:
+            parsed.append(parsed_value)
+    return tuple(parsed)
+
+
+def _coerce_issue_id(issue_id: Any, issue_key: str) -> int:
+    parsed = _parse_issue_reference(issue_id)
+    if parsed is not None:
+        return parsed
+    key_parsed = _parse_issue_reference(issue_key)
+    if key_parsed is not None:
+        return key_parsed
+    raise ValueError("Unable to infer numeric issue_id from payload")
 
 
 def _normalize_document(document: IssueDocument) -> IssueDocument:
@@ -100,6 +157,52 @@ def _expand_reverse_links(documents: list[IssueDocument]) -> list[IssueDocument]
 
 
 def _document_from_mapping(payload: dict[str, Any]) -> IssueDocument:
+    if "metadata" in payload and isinstance(payload["metadata"], dict):
+        metadata = payload["metadata"]
+        issue_key = payload.get("jira_id", metadata.get("issue_key", metadata.get("key")))
+        title = metadata.get("summary", metadata.get("title"))
+        if issue_key is None:
+            raise ValueError("Each nested Jira record must contain 'jira_id' or metadata.issue_key.")
+        if title is None:
+            raise ValueError("Each nested Jira record must contain metadata.summary or metadata.title.")
+
+        issue_id = _coerce_issue_id(
+            metadata.get("issue_id", payload.get("issue_id", payload.get("id"))),
+            str(issue_key),
+        )
+
+        comments = _read_text_tuple(metadata.get("comments"))
+        if not comments:
+            comments_body = metadata.get("comments_body")
+            if isinstance(comments_body, str) and comments_body.strip():
+                comments = (comments_body.strip(),)
+
+        return _normalize_document(
+            IssueDocument(
+                issue_id=issue_id,
+                issue_key=str(issue_key),
+                project_key=metadata.get("project_key"),
+                title=str(title),
+                description_text=str(metadata.get("description", metadata.get("description_text", ""))),
+                issue_type=metadata.get("issue_type"),
+                priority=metadata.get("priority"),
+                status=metadata.get("status"),
+                resolution=metadata.get("resolution"),
+                components=_read_text_tuple(metadata.get("components")),
+                affected_versions=_read_text_tuple(
+                    metadata.get("affected_versions", metadata.get("affects_versions"))
+                ),
+                fix_versions=_read_text_tuple(metadata.get("fix_versions")),
+                comments=comments,
+                linked_issue_ids=_read_issue_reference_tuple(
+                    metadata.get("linked_issue_ids", metadata.get("related_issues"))
+                ),
+                duplicate_issue_ids=_read_issue_reference_tuple(
+                    metadata.get("duplicate_issue_ids", metadata.get("duplicate_issues"))
+                ),
+            )
+        )
+
     issue_id = payload.get("issue_id", payload.get("id"))
     issue_key = payload.get("issue_key", payload.get("key"))
     title = payload.get("title")
@@ -113,7 +216,7 @@ def _document_from_mapping(payload: dict[str, Any]) -> IssueDocument:
 
     return _normalize_document(
         IssueDocument(
-            issue_id=int(issue_id),
+            issue_id=_coerce_issue_id(issue_id, str(issue_key)),
             issue_key=str(issue_key),
             project_key=payload.get("project_key"),
             title=str(title),
@@ -126,8 +229,8 @@ def _document_from_mapping(payload: dict[str, Any]) -> IssueDocument:
             affected_versions=_read_text_tuple(payload.get("affected_versions")),
             fix_versions=_read_text_tuple(payload.get("fix_versions")),
             comments=_read_text_tuple(payload.get("comments")),
-            linked_issue_ids=_read_int_tuple(payload.get("linked_issue_ids")),
-            duplicate_issue_ids=_read_int_tuple(payload.get("duplicate_issue_ids")),
+            linked_issue_ids=_read_issue_reference_tuple(payload.get("linked_issue_ids")),
+            duplicate_issue_ids=_read_issue_reference_tuple(payload.get("duplicate_issue_ids")),
         )
     )
 
@@ -152,6 +255,12 @@ class JsonIssueRepository(BaseIssueRepository):
         payload = json.loads(self._json_path.read_text(encoding="utf-8"))
         if isinstance(payload, dict):
             raw_issues = payload.get("issues")
+            if raw_issues is None and (
+                "jira_id" in payload
+                or "issue_id" in payload
+                or "id" in payload
+            ):
+                raw_issues = [payload]
         else:
             raw_issues = payload
 

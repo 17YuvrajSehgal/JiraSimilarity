@@ -87,6 +87,14 @@ class JiraSimilarityEngine:
     ) -> list[SearchResult]:
         prepared_query = prepare_issue(query)
         pool_size = candidate_pool_size or self._candidate_pool_size
+        if pipeline.max_candidate_pool_size is not None and pool_size > pipeline.max_candidate_pool_size:
+            logger.debug(
+                "Capping candidate pool for model=%s from %s to %s to match reranker training distribution",
+                model_name,
+                pool_size,
+                pipeline.max_candidate_pool_size,
+            )
+            pool_size = pipeline.max_candidate_pool_size
         candidate_matches = pipeline.candidate_generator.generate(
             prepared_query,
             self._index,

@@ -38,6 +38,7 @@ NEURAL_FEATURE_NAMES = (
     "length_ratio",
     "candidate_seed",
 )
+PAIRWISE_RERANK_POOL_SIZE = 30
 
 
 def _relu(value: float) -> float:
@@ -340,7 +341,7 @@ def build_deep_pairwise_pipelines(
         feature_extractor=feature_extractor,
         candidate_generator=candidate_generator,
         negatives_per_positive=3,
-        hard_negative_pool_size=30,
+        hard_negative_pool_size=PAIRWISE_RERANK_POOL_SIZE,
     ).build(
         index,
         holdout_issue_ids=holdout_issue_ids,
@@ -352,5 +353,6 @@ def build_deep_pairwise_pipelines(
             candidate_generator=candidate_generator,
             feature_extractor=feature_extractor,
             reranker=NeuralPairwiseReranker(trained_model),
+            max_candidate_pool_size=PAIRWISE_RERANK_POOL_SIZE,
         )
     }

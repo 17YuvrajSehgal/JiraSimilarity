@@ -190,5 +190,6 @@ Use `--log-level DEBUG` when you want to see model-building and evaluation progr
 - Deep pairwise duplicate classification: [docs/deep-pairwise-duplicate-classification.md](/C:/workplace/JiraSimilarity/docs/deep-pairwise-duplicate-classification.md)
 - LLM-based and RAG-style approaches: [docs/llm-rag-style-approaches.md](/C:/workplace/JiraSimilarity/docs/llm-rag-style-approaches.md)
 - Graph- and metadata-aware models: [docs/graph-metadata-aware-models.md](/C:/workplace/JiraSimilarity/docs/graph-metadata-aware-models.md)
+- Evaluation metrics guide: [docs/evaluation-metrics-guide.md](/C:/workplace/JiraSimilarity/docs/evaluation-metrics-guide.md)
 - Synthetic dataset usage: [docs/synthetic-dataset.md](/C:/workplace/JiraSimilarity/docs/synthetic-dataset.md)
 - Broader future model ideas: [docs/various-ml-solutions.md](/C:/workplace/JiraSimilarity/docs/various-ml-solutions.md)

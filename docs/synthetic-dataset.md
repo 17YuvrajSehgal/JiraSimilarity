@@ -6,7 +6,41 @@ This project now includes a synthetic Jira-like dataset designed for fast experi
 
 - Generator script: `scripts/generate_synthetic_jira_dataset.py`
 - Default generated output: `datasets/synthetic/synthetic_jira_issues.json`
+- Issue records follow the same nested pattern as `datasets/synthetic/original.json`:
+  - top-level `jira_id`
+  - nested `metadata` object with Jira-like fields (`summary`, `project_*`, `issue_type`, `status`, `priority`, `description`, `history`, `activity`, etc.)
 - Input format is directly compatible with the existing JSON source adapter in `jira_similarity`.
+
+## Record pattern
+
+Each synthetic issue record looks like:
+
+```json
+{
+  "jira_id": "PAY-10000",
+  "metadata": {
+    "issue_id": 10000,
+    "summary": "...",
+    "project_key": "PAY",
+    "issue_type": "Bug",
+    "status": "Open",
+    "priority": "High",
+    "affects_versions": ["2026.1"],
+    "components": ["payments"],
+    "fix_versions": ["2026.2"],
+    "description": "...",
+    "related_issues": ["PAY-10001"],
+    "duplicate_issues": ["PAY-10001"],
+    "comments_id": ["1000001", "1000002"],
+    "comments_body": "...",
+    "history": [],
+    "activity": [],
+    "submissions": []
+  }
+}
+```
+
+Research extension fields remain available in `metadata.synthetic_profile` and top-level `pair_labels`.
 
 ## Why this dataset exists
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timedelta, timezone
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -242,6 +243,117 @@ def _pick(rng: random.Random, values: tuple[str, ...]) -> str:
     return values[rng.randrange(len(values))]
 
 
+def _format_ts(value: datetime) -> str:
+    return value.strftime("%Y-%m-%dT%H:%M:%S.000%z")
+
+
+def _comments_blob(comments: tuple[str, ...]) -> str:
+    return "\n".join(comments)
+
+
+def _build_history(
+    *,
+    issue_key: str,
+    reporter: str,
+    assignee: str,
+    base_time: datetime,
+    status: str,
+    resolution: str | None,
+) -> list[dict[str, object]]:
+    history: list[dict[str, object]] = [
+        {
+            "id": f"{issue_key}-h1",
+            "author": reporter,
+            "created": _format_ts(base_time + timedelta(minutes=5)),
+            "items": [
+                {
+                    "field": "status",
+                    "fieldtype": "jira",
+                    "from": "Needs Triage",
+                    "to": "Open",
+                    "from_id": None,
+                    "to_id": "1",
+                }
+            ],
+        }
+    ]
+    if status in {"In Progress", "Resolved"}:
+        history.append(
+            {
+                "id": f"{issue_key}-h2",
+                "author": assignee,
+                "created": _format_ts(base_time + timedelta(hours=6)),
+                "items": [
+                    {
+                        "field": "status",
+                        "fieldtype": "jira",
+                        "from": "Open",
+                        "to": "In Progress",
+                        "from_id": "1",
+                        "to_id": "3",
+                    }
+                ],
+            }
+        )
+    if status == "Resolved":
+        history.append(
+            {
+                "id": f"{issue_key}-h3",
+                "author": assignee,
+                "created": _format_ts(base_time + timedelta(days=2)),
+                "items": [
+                    {
+                        "field": "resolution",
+                        "fieldtype": "jira",
+                        "from": None,
+                        "to": resolution or "Fixed",
+                        "from_id": None,
+                        "to_id": "1",
+                    },
+                    {
+                        "field": "status",
+                        "fieldtype": "jira",
+                        "from": "In Progress",
+                        "to": "Resolved",
+                        "from_id": "3",
+                        "to_id": "5",
+                    },
+                ],
+            }
+        )
+    return history
+
+
+def _build_activity(
+    *,
+    issue_key: str,
+    history: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    grouped: dict[str, list[dict[str, object]]] = {}
+    for entry in history:
+        created = str(entry["created"])
+        date_key = created[:10]
+        events = grouped.setdefault(date_key, [])
+        for item in entry["items"]:
+            events.append(
+                {
+                    "type": "history",
+                    "id": entry["id"],
+                    "author": entry["author"],
+                    "created": created,
+                    "timestamp": created,
+                    "field": item["field"],
+                    "from": item["from"],
+                    "to": item["to"],
+                    "description": (
+                        f"{entry['author']} changed {item['field']} "
+                        f"from {item['from']} to {item['to']} on {issue_key}"
+                    ),
+                }
+            )
+    return [{"date": day, "events": events} for day, events in sorted(grouped.items())]
+
+
 def _build_issue(
     *,
     issue_id: int,
@@ -259,8 +371,26 @@ def _build_issue(
     comments: tuple[str, ...],
     semantic_cluster_id: str,
     role: str,
+    reporter: str,
+    assignee: str,
+    created_at: datetime,
+    rng: random.Random,
 ) -> dict[str, object]:
+    updated_at = created_at + timedelta(days=2)
+    resolved_at = updated_at if status == "Resolved" else None
+    history = _build_history(
+        issue_key=issue_key,
+        reporter=reporter,
+        assignee=assignee,
+        base_time=created_at,
+        status=status,
+        resolution=resolution,
+    )
+    activity = _build_activity(issue_key=issue_key, history=history)
+    comment_ids = [f"{issue_id}{index:02d}" for index, _ in enumerate(comments, start=1)]
     return {
+        "jira_id": issue_key,
+        # Backward-compatible flat fields for older JSON adapters.
         "issue_id": issue_id,
         "issue_key": issue_key,
         "project_key": project_key,
@@ -276,9 +406,52 @@ def _build_issue(
         "comments": list(comments),
         "linked_issue_ids": [],
         "duplicate_issue_ids": [],
-        "synthetic_profile": {
-            "semantic_cluster_id": semantic_cluster_id,
-            "role": role,
+        "metadata": {
+            "issue_id": issue_id,
+            "summary": title,
+            "project_id": str(18000 + (issue_id % 1000)),
+            "project_key": project_key,
+            "project_name": f"{project_key} Synthetic Engineering",
+            "issue_type": issue_type,
+            "status": status,
+            "priority": priority,
+            "affects_versions": list(affected_versions),
+            "components": [component],
+            "labels": [f"cluster-{semantic_cluster_id.split('-')[-1]}", role],
+            "design_category": None,
+            "found_in_load": None,
+            "epic_link": None,
+            "backlog_status": None,
+            "resolution": resolution,
+            "fix_versions": list(fix_versions),
+            "description": description,
+            "attachments": [],
+            "assignee": assignee,
+            "reporter": reporter,
+            "watcher_count": rng.randint(1, 6),
+            "created_at": _format_ts(created_at),
+            "updated_at": _format_ts(updated_at),
+            "resolved_at": _format_ts(resolved_at) if resolved_at else None,
+            "development": {
+                "commit_count": rng.randint(0, 8),
+                "pr_count": rng.randint(0, 3),
+                "branch_count": rng.randint(0, 2),
+                "repository_count": rng.randint(1, 4),
+                "last_updated": _format_ts(updated_at),
+            },
+            "sprints": [],
+            "related_issues": [],
+            "duplicate_issues": [],
+            "comments_id": comment_ids,
+            "comments_body": _comments_blob(comments),
+            "worklog": [],
+            "history": history,
+            "activity": activity,
+            "submissions": [],
+            "synthetic_profile": {
+                "semantic_cluster_id": semantic_cluster_id,
+                "role": role,
+            },
         },
     }
 
@@ -290,10 +463,16 @@ def build_synthetic_dataset(*, cluster_count: int, random_seed: int) -> dict[str
     rng = random.Random(random_seed)
     templates = _scenario_templates()
     issues: list[dict[str, object]] = []
-    issue_by_id: dict[int, dict[str, object]] = {}
     pair_labels: list[dict[str, object]] = []
     related_issue_ids: list[int] = []
     semantic_cluster_by_issue: dict[int, str] = {}
+    issue_key_by_id: dict[int, str] = {}
+    people = (
+        ("Alex Wong", "Priya Iyer"),
+        ("Jordan Lee", "Marta Silva"),
+        ("Nina Patel", "Chris Bennett"),
+        ("Samir Khan", "Dana Ortiz"),
+    )
 
     issue_id = 10000
     release_cycle = ("2026.1", "2026.2", "2026.3", "2026.4")
@@ -308,11 +487,14 @@ def build_synthetic_dataset(*, cluster_count: int, random_seed: int) -> dict[str
         signature_token = f"sig_{template.name.replace('-', '_')}_{cluster_idx + 1:03d}"
         affected_version = release_cycle[cluster_idx % len(release_cycle)]
         next_version = release_cycle[(cluster_idx + 1) % len(release_cycle)]
+        reporter, assignee = people[cluster_idx % len(people)]
+        created_base = datetime(2025, 1, 1, 9, 0, tzinfo=timezone.utc) + timedelta(days=cluster_idx)
 
         anchor_id = issue_id
+        anchor_key = next_issue_key(template.project_key, anchor_id)
         anchor = _build_issue(
             issue_id=anchor_id,
-            issue_key=next_issue_key(template.project_key, anchor_id),
+            issue_key=anchor_key,
             project_key=template.project_key,
             issue_type=template.issue_type,
             priority=priorities[cluster_idx % 2],
@@ -329,13 +511,18 @@ def build_synthetic_dataset(*, cluster_count: int, random_seed: int) -> dict[str
             ),
             semantic_cluster_id=semantic_cluster_id,
             role="anchor",
+            reporter=reporter,
+            assignee=assignee,
+            created_at=created_base,
+            rng=rng,
         )
         issue_id += 1
 
         duplicate_id = issue_id
+        duplicate_key = next_issue_key(template.project_key, duplicate_id)
         duplicate = _build_issue(
             issue_id=duplicate_id,
-            issue_key=next_issue_key(template.project_key, duplicate_id),
+            issue_key=duplicate_key,
             project_key=template.project_key,
             issue_type=template.issue_type,
             priority=priorities[(cluster_idx + 1) % 3],
@@ -352,13 +539,18 @@ def build_synthetic_dataset(*, cluster_count: int, random_seed: int) -> dict[str
             ),
             semantic_cluster_id=semantic_cluster_id,
             role="duplicate-paraphrase",
+            reporter=reporter,
+            assignee=assignee,
+            created_at=created_base + timedelta(hours=2),
+            rng=rng,
         )
         issue_id += 1
 
         related_id = issue_id
+        related_key = next_issue_key(template.project_key, related_id)
         related = _build_issue(
             issue_id=related_id,
-            issue_key=next_issue_key(template.project_key, related_id),
+            issue_key=related_key,
             project_key=template.project_key,
             issue_type=template.issue_type,
             priority="Medium",
@@ -372,13 +564,18 @@ def build_synthetic_dataset(*, cluster_count: int, random_seed: int) -> dict[str
             comments=("May share root cause but not confirmed duplicate.",),
             semantic_cluster_id=semantic_cluster_id,
             role="related-medium-similarity",
+            reporter=reporter,
+            assignee=assignee,
+            created_at=created_base + timedelta(hours=4),
+            rng=rng,
         )
         issue_id += 1
 
         hard_negative_id = issue_id
+        hard_negative_key = next_issue_key(template.project_key, hard_negative_id)
         hard_negative = _build_issue(
             issue_id=hard_negative_id,
-            issue_key=next_issue_key(template.project_key, hard_negative_id),
+            issue_key=hard_negative_key,
             project_key=template.project_key,
             issue_type=("Task" if template.issue_type != "Task" else "Story"),
             priority="Low",
@@ -392,14 +589,19 @@ def build_synthetic_dataset(*, cluster_count: int, random_seed: int) -> dict[str
             comments=("Backlog item with lexical overlap but different intent.",),
             semantic_cluster_id=semantic_cluster_id,
             role="hard-negative-low-similarity",
+            reporter=reporter,
+            assignee=assignee,
+            created_at=created_base + timedelta(days=1),
+            rng=rng,
         )
         issue_id += 1
 
         cross_project = "PLAT" if template.project_key != "PLAT" else "CORE"
         cross_project_id = issue_id
+        cross_project_key = next_issue_key(cross_project, cross_project_id)
         cross_project_issue = _build_issue(
             issue_id=cross_project_id,
-            issue_key=next_issue_key(cross_project, cross_project_id),
+            issue_key=cross_project_key,
             project_key=cross_project,
             issue_type="Bug",
             priority="Medium",
@@ -416,9 +618,18 @@ def build_synthetic_dataset(*, cluster_count: int, random_seed: int) -> dict[str
             comments=("Potentially related by wording only; not same defect.",),
             semantic_cluster_id=f"cross-{cluster_idx + 1:03d}",
             role="cross-project-low-similarity",
+            reporter=reporter,
+            assignee=assignee,
+            created_at=created_base + timedelta(days=1, hours=6),
+            rng=rng,
         )
         issue_id += 1
 
+        anchor["metadata"]["duplicate_issues"] = [duplicate_key]
+        duplicate["metadata"]["duplicate_issues"] = [anchor_key]
+        anchor["metadata"]["related_issues"] = [duplicate_key, related_key]
+        duplicate["metadata"]["related_issues"] = [anchor_key, related_key]
+        related["metadata"]["related_issues"] = [anchor_key, duplicate_key]
         anchor["duplicate_issue_ids"] = [duplicate_id]
         duplicate["duplicate_issue_ids"] = [anchor_id]
         anchor["linked_issue_ids"] = [duplicate_id, related_id]
@@ -427,16 +638,20 @@ def build_synthetic_dataset(*, cluster_count: int, random_seed: int) -> dict[str
 
         if related_issue_ids and rng.random() < 0.35:
             bridge_target = related_issue_ids[rng.randrange(len(related_issue_ids))]
-            related_links = related["linked_issue_ids"]
+            related_links = related["metadata"]["related_issues"]
             if isinstance(related_links, list):
-                related_links.append(bridge_target)
+                related_links.append(issue_key_by_id.get(bridge_target, f"SYN-{bridge_target}"))
+            related_link_ids = related["linked_issue_ids"]
+            if isinstance(related_link_ids, list):
+                related_link_ids.append(bridge_target)
 
         issues.extend([anchor, duplicate, related, hard_negative, cross_project_issue])
 
         for issue in (anchor, duplicate, related, hard_negative, cross_project_issue):
-            issue_by_id[int(issue["issue_id"])] = issue
-            semantic_cluster_by_issue[int(issue["issue_id"])] = str(
-                issue["synthetic_profile"]["semantic_cluster_id"]
+            issue_metadata = issue["metadata"]
+            issue_key_by_id[int(issue_metadata["issue_id"])] = str(issue["jira_id"])
+            semantic_cluster_by_issue[int(issue_metadata["issue_id"])] = str(
+                issue_metadata["synthetic_profile"]["semantic_cluster_id"]
             )
 
         related_issue_ids.append(related_id)
@@ -445,6 +660,8 @@ def build_synthetic_dataset(*, cluster_count: int, random_seed: int) -> dict[str
             {
                 "left_issue_id": anchor_id,
                 "right_issue_id": duplicate_id,
+                "left_jira_id": anchor_key,
+                "right_jira_id": duplicate_key,
                 "label": 1,
                 "relationship_type": "duplicate",
                 "similarity_band": "high",
@@ -454,6 +671,8 @@ def build_synthetic_dataset(*, cluster_count: int, random_seed: int) -> dict[str
             {
                 "left_issue_id": anchor_id,
                 "right_issue_id": related_id,
+                "left_jira_id": anchor_key,
+                "right_jira_id": related_key,
                 "label": 1,
                 "relationship_type": "linked",
                 "similarity_band": "medium",
@@ -463,13 +682,15 @@ def build_synthetic_dataset(*, cluster_count: int, random_seed: int) -> dict[str
             {
                 "left_issue_id": anchor_id,
                 "right_issue_id": hard_negative_id,
+                "left_jira_id": anchor_key,
+                "right_jira_id": hard_negative_key,
                 "label": 0,
                 "relationship_type": "hard_negative",
                 "similarity_band": "low",
             }
         )
 
-    all_issue_ids = [int(issue["issue_id"]) for issue in issues]
+    all_issue_ids = [int(issue["metadata"]["issue_id"]) for issue in issues]
     negative_target_count = min(len(pair_labels), max(10, cluster_count * 2))
     negative_count = 0
     seen_pairs: set[tuple[int, int]] = set()
@@ -489,6 +710,8 @@ def build_synthetic_dataset(*, cluster_count: int, random_seed: int) -> dict[str
             {
                 "left_issue_id": pair[0],
                 "right_issue_id": pair[1],
+                "left_jira_id": issue_key_by_id.get(pair[0], f"SYN-{pair[0]}"),
+                "right_jira_id": issue_key_by_id.get(pair[1], f"SYN-{pair[1]}"),
                 "label": 0,
                 "relationship_type": "random_negative",
                 "similarity_band": "low",
@@ -496,8 +719,8 @@ def build_synthetic_dataset(*, cluster_count: int, random_seed: int) -> dict[str
         )
         negative_count += 1
 
-    duplicate_edges = sum(len(issue["duplicate_issue_ids"]) for issue in issues)
-    linked_edges = sum(len(issue["linked_issue_ids"]) for issue in issues)
+    duplicate_edges = sum(len(issue["metadata"]["duplicate_issues"]) for issue in issues)
+    linked_edges = sum(len(issue["metadata"]["related_issues"]) for issue in issues)
 
     return {
         "meta": {
@@ -515,6 +738,8 @@ def build_synthetic_dataset(*, cluster_count: int, random_seed: int) -> dict[str
             "research_extensions": [
                 "synthetic_profile",
                 "pair_labels",
+                "metadata.issue_id",
+                "metadata.duplicate_issues",
             ],
         },
         "issues": issues,

@@ -315,6 +315,7 @@ class RetrievalPipeline:
     candidate_generator: CandidateGenerator
     feature_extractor: FeatureExtractor
     reranker: Reranker
+    max_candidate_pool_size: int | None = None
 
 
 def build_pipeline_registry(
