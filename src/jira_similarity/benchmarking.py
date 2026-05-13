@@ -29,12 +29,16 @@ class BenchmarkRunResult:
     sample_size: int | None
     top_k_values: tuple[int, ...]
     evaluations: tuple[ModelEvaluation, ...]
+    evaluated_model_names: tuple[str, ...] = ()
+    skipped_model_names: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         return {
             "suite_name": self.suite_name,
             "task": self.task,
             "model_names": list(self.model_names),
+            "evaluated_model_names": list(self.evaluated_model_names),
+            "skipped_model_names": list(self.skipped_model_names),
             "sample_size": self.sample_size,
             "top_k_values": list(self.top_k_values),
             "evaluations": [
@@ -84,15 +88,15 @@ def build_benchmark_suites() -> dict[str, BenchmarkSuite]:
         ),
         "dense-semantic-similarity": BenchmarkSuite(
             name="dense-semantic-similarity",
-            description="Compare sparse, supervised, and dense semantic retrieval models.",
+            description="Compare sparse, supervised, random-indexing, and SBERT dense semantic retrieval models.",
             task="similarity",
-            model_names=("bm25-plus", "logreg-engineered", "random-indexing-dense"),
+            model_names=("bm25-plus", "logreg-engineered", "random-indexing-dense", "sbert-dense"),
         ),
         "dense-semantic-duplicates": BenchmarkSuite(
             name="dense-semantic-duplicates",
-            description="Compare duplicate-oriented ranking across sparse, supervised, and dense semantic models.",
+            description="Compare duplicate-oriented ranking across sparse, supervised, random-indexing, and SBERT models.",
             task="duplicates",
-            model_names=("bm25-plus", "logreg-engineered", "random-indexing-dense"),
+            model_names=("bm25-plus", "logreg-engineered", "random-indexing-dense", "sbert-dense"),
         ),
         "hybrid-sparse-dense-similarity": BenchmarkSuite(
             name="hybrid-sparse-dense-similarity",
@@ -129,6 +133,18 @@ def build_benchmark_suites() -> dict[str, BenchmarkSuite]:
             description="Compare hybrid retrieval and RAG-style reasoning for similar-issue ranking.",
             task="similarity",
             model_names=("hybrid-sparse-dense", "rag-hybrid-judge"),
+        ),
+        "llm-transformer-similarity": BenchmarkSuite(
+            name="llm-transformer-similarity",
+            description="Compare sparse baseline and transformer embedding/cross-encoder models for similarity.",
+            task="similarity",
+            model_names=("bm25", "llm-e5-large", "llm-e5-cross-reranker"),
+        ),
+        "llm-transformer-duplicates": BenchmarkSuite(
+            name="llm-transformer-duplicates",
+            description="Compare duplicate ranking with BM25 and transformer embedding/cross-encoder models.",
+            task="duplicates",
+            model_names=("bm25", "llm-e5-large", "llm-e5-cross-reranker"),
         ),
         "graph-metadata-similarity": BenchmarkSuite(
             name="graph-metadata-similarity",
@@ -174,15 +190,27 @@ class BenchmarkRunner:
                 top_k_values=top_k_values,
             )
         )
+        evaluated_model_names = tuple(evaluation.model_name for evaluation in evaluations)
+        evaluated_name_set = set(evaluated_model_names)
+        skipped_model_names = tuple(
+            model_name for model_name in resolved_model_names if model_name not in evaluated_name_set
+        )
         result = BenchmarkRunResult(
             suite_name="ad-hoc",
             task=task,
             model_names=resolved_model_names,
+            evaluated_model_names=evaluated_model_names,
+            skipped_model_names=skipped_model_names,
             sample_size=sample_size,
             top_k_values=top_k_values,
             evaluations=evaluations,
         )
-        logger.info("Ad-hoc benchmark finished: evaluations=%s", len(evaluations))
+        logger.info(
+            "Ad-hoc benchmark finished: requested=%s evaluated=%s skipped=%s",
+            len(resolved_model_names),
+            len(evaluated_model_names),
+            len(skipped_model_names),
+        )
         return result
 
     def run_suite(
@@ -214,13 +242,26 @@ class BenchmarkRunner:
                 top_k_values=top_k_values,
             )
         )
+        evaluated_model_names = tuple(evaluation.model_name for evaluation in evaluations)
+        evaluated_name_set = set(evaluated_model_names)
+        skipped_model_names = tuple(
+            model_name for model_name in suite.model_names if model_name not in evaluated_name_set
+        )
         result = BenchmarkRunResult(
             suite_name=suite.name,
             task=suite.task,
             model_names=suite.model_names,
+            evaluated_model_names=evaluated_model_names,
+            skipped_model_names=skipped_model_names,
             sample_size=sample_size,
             top_k_values=top_k_values,
             evaluations=evaluations,
         )
-        logger.info("Benchmark suite finished: suite=%s evaluations=%s", suite.name, len(evaluations))
+        logger.info(
+            "Benchmark suite finished: suite=%s requested=%s evaluated=%s skipped=%s",
+            suite.name,
+            len(suite.model_names),
+            len(evaluated_model_names),
+            len(skipped_model_names),
+        )
         return result

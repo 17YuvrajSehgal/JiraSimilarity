@@ -79,23 +79,25 @@ class LocalRAGJudge(Reranker):
         retrieval_confidence = feature_scores.get("retrieval_confidence", 0.0)
 
         score = (
-            (0.28 * dense_cosine)
-            + (0.18 * bm25_plus)
-            + (0.10 * title_ngram)
+            (0.24 * dense_cosine)
+            + (0.16 * bm25_plus)
+            + (0.09 * title_ngram)
             + (0.08 * description_overlap)
             + (0.10 * component_overlap)
             + (0.08 * project_match)
-            + (0.05 * issue_type_match)
+            + (0.06 * issue_type_match)
             + (0.04 * priority_match)
             + (0.05 * candidate_seed)
-            + (0.02 * semantic_lexical_agreement)
-            + (0.02 * metadata_alignment)
+            + (0.05 * semantic_lexical_agreement)
+            + (0.05 * metadata_alignment)
         )
 
         if dense_cosine >= 0.22 and bm25_plus >= 0.28:
             score += 0.10
         if semantic_lexical_agreement >= 0.28 and metadata_alignment >= 0.40:
             score += 0.08
+        if retrieval_confidence >= 0.40 and metadata_alignment >= 0.30:
+            score += 0.04
         if project_match == 0.0 and component_overlap == 0.0 and dense_cosine < 0.14:
             score -= self._contradiction_penalty
         if issue_type_match == 0.0 and retrieval_confidence < 0.16:

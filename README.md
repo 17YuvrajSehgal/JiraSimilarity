@@ -1,6 +1,6 @@
 # Jira Similarity
 
-This repository currently implements seven model families for Jira issue similarity and duplicate analysis:
+This repository currently implements eight model families for Jira issue similarity and duplicate analysis:
 
 - sparse lexical retrieval
 - classical supervised ML with engineered features
@@ -8,6 +8,7 @@ This repository currently implements seven model families for Jira issue similar
 - hybrid sparse-dense retrieval
 - deep pairwise duplicate classification
 - LLM-based and RAG-style reasoning
+- transformer language-model retrieval/reranking
 - graph- and metadata-aware models
 
 The goal is to add one family at a time while keeping the codebase clean, testable, and ready for comparative benchmarking. The dataset lives in [datasets/TAWOS](/C:/workplace/JiraSimilarity/datasets/TAWOS), and the code is organized so data access, preprocessing, retrieval, learning, and evaluation stay separate.
@@ -23,12 +24,16 @@ The goal is to add one family at a time while keeping the codebase clean, testab
   - `logreg-engineered`
 - Dense semantic models:
   - `random-indexing-dense`
+  - `sbert-dense`
 - Hybrid sparse-dense models:
   - `hybrid-sparse-dense`
 - Deep pairwise duplicate models:
   - `pairwise-neural-mlp`
 - LLM/RAG-style models:
   - `rag-hybrid-judge`
+- Transformer language models:
+  - `llm-e5-large`
+  - `llm-e5-cross-reranker`
 - Graph/metadata-aware models:
   - `graph-metadata-aware`
 - Source adapters for:
@@ -62,6 +67,18 @@ If you want GPU acceleration (PyTorch-backed paths for dense scoring and model t
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -e .[gpu]
+```
+
+If you want transformer language-model pipelines (E5 embeddings and cross-encoder reranking), install:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e .[llm,gpu]
+```
+
+If you want saved train/validation/test curve plots for supervised model training diagnostics, install:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e .[viz]
 ```
 
 The runtime supports both GPU and non-GPU machines:
@@ -165,6 +182,14 @@ Run a named benchmark suite:
 
 Use `--log-level DEBUG` when you want to see model-building and evaluation progress in more detail.
 
+Training diagnostics are enabled by default for supervised models (`logreg-engineered`, `pairwise-neural-mlp`):
+
+- JSON and CSV curves are saved under `results/training_curves/<model>/`
+- Plot images (`*_loss.png`, `*_f1.png`) are generated when `matplotlib` is installed
+- To avoid thousands of files during per-query holdout evaluation, saves are capped by default to 3 files/model
+  (`JIRA_TRAINING_DIAGNOSTICS_MAX_FILES_PER_MODEL`, use `-1` for unlimited)
+- Disable with `--disable-training-diagnostics` or `JIRA_TRAINING_DIAGNOSTICS=0`
+
 ## Project structure
 
 - [src/jira_similarity/repository.py](/C:/workplace/JiraSimilarity/src/jira_similarity/repository.py) handles source adapters and keeps input concerns away from retrieval logic.
@@ -179,6 +204,68 @@ Use `--log-level DEBUG` when you want to see model-building and evaluation progr
 - [src/jira_similarity/model_families/graph_metadata.py](/C:/workplace/JiraSimilarity/src/jira_similarity/model_families/graph_metadata.py) contains the graph- and metadata-aware family.
 - [src/jira_similarity/engine.py](/C:/workplace/JiraSimilarity/src/jira_similarity/engine.py) coordinates search, duplicate filtering, and evaluation.
 - [src/jira_similarity/benchmarking.py](/C:/workplace/JiraSimilarity/src/jira_similarity/benchmarking.py) keeps comparative analysis structured.
+
+## System overview diagram
+
+```mermaid
+flowchart TD
+    U["Researcher / CLI User"] --> CLI["jira_similarity CLI"]
+    CLI --> CFG["Config + Runtime Options<br/>source, device, models, k, sample size"]
+    CFG --> APP["ApplicationBuilder / Bootstrap"]
+    APP --> REPO["Issue Repository Layer"]
+
+    REPO --> MYSQL["MySQL Source"]
+    REPO --> JSON["JSON Source (synthetic / exported)"]
+    REPO --> JIRA["Jira API Source (placeholder)"]
+
+    REPO --> DOCS["IssueDocument Objects"]
+    DOCS --> TEXT["Text Preparation<br/>tokenization, weighting, metadata normalization"]
+    TEXT --> INDEX["SearchIndex<br/>postings, tf-idf, project index"]
+    INDEX --> REG["Pipeline Registry Builder"]
+
+    REG --> SPARSE["Sparse Lexical Family<br/>tfidf-cosine, bm25, bm25-plus, lexical"]
+    REG --> CLASSICAL["Classical Supervised Family<br/>logreg-engineered"]
+    REG --> DENSE["Dense Semantic Family<br/>random-indexing-dense, sbert-dense"]
+    REG --> HYBRID["Hybrid Sparse-Dense Family<br/>hybrid-sparse-dense"]
+    REG --> PAIRWISE["Deep Pairwise Family<br/>pairwise-neural-mlp"]
+    REG --> RAG["RAG-Style Family<br/>rag-hybrid-judge"]
+    REG --> GRAPH["Graph + Metadata Family<br/>graph-metadata-aware"]
+    REG --> LLM["Transformer Family<br/>llm-e5-large, llm-e5-cross-reranker"]
+
+    SPARSE --> ENGINE["JiraSimilarityEngine"]
+    CLASSICAL --> ENGINE
+    DENSE --> ENGINE
+    HYBRID --> ENGINE
+    PAIRWISE --> ENGINE
+    RAG --> ENGINE
+    GRAPH --> ENGINE
+    LLM --> ENGINE
+
+    ENGINE --> CAND["Candidate Generation"]
+    CAND --> FEAT["Feature Extraction"]
+    FEAT --> RERANK["Reranking / Scoring"]
+    RERANK --> OUT["Ranked Search Results"]
+
+    OUT --> SIM["similar Command"]
+    OUT --> DUP["duplicates Command"]
+    OUT --> EVAL["evaluate Command"]
+    OUT --> BENCH["benchmark Command"]
+
+    EVAL --> RES["ResultsWriter<br/>JSON + Markdown"]
+    BENCH --> RES
+    SIM --> RES
+    DUP --> RES
+
+    CLASSICAL --> DIAG["Training Diagnostics<br/>train/val/test metrics + curves"]
+    PAIRWISE --> DIAG
+    DIAG --> CURVES["results/training_curves"]
+
+    CFG --> COMP["Compute Runtime<br/>CPU / CUDA auto-selection"]
+    COMP --> DENSE
+    COMP --> CLASSICAL
+    COMP --> PAIRWISE
+    COMP --> LLM
+```
 
 ## Current documentation
 

@@ -18,6 +18,16 @@ def _squash(score: float, scale: float = 8.0) -> float:
     return score / (score + scale)
 
 
+def _normalize_seed_score(seed_score: float) -> float:
+    if seed_score <= 0:
+        if seed_score < 0:
+            return max(0.0, min(1.0, (seed_score + 1.0) / 2.0))
+        return 0.0
+    if seed_score <= 1.0:
+        return seed_score
+    return _squash(seed_score, scale=12.0)
+
+
 @dataclass(frozen=True, slots=True)
 class CandidateMatch:
     issue_id: int
@@ -235,7 +245,7 @@ class StandardFeatureExtractor(FeatureExtractor):
                 jaccard_similarity(query.description_terms, candidate.description_terms),
                 4,
             ),
-            "candidate_seed": round(_squash(seed_score, scale=12.0), 4),
+            "candidate_seed": round(_normalize_seed_score(seed_score), 4),
         }
 
 
@@ -330,6 +340,7 @@ def build_pipeline_registry(
     from .model_families.dense_semantic import build_dense_embedding_space, build_dense_semantic_pipelines
     from .model_families.graph_metadata import build_graph_metadata_pipelines
     from .model_families.hybrid_sparse_dense import build_hybrid_sparse_dense_pipelines
+    from .model_families.language_models import build_language_model_pipelines
     from .model_families.llm_rag import build_llm_rag_pipelines
     from .model_families.sparse_lexical import build_sparse_lexical_pipelines
 
@@ -345,11 +356,14 @@ def build_pipeline_registry(
 
     sparse_models = frozenset({"tfidf-cosine", "bm25", "bm25-plus", "lexical"})
     classical_models = frozenset({"logreg-engineered"})
-    dense_models = frozenset({"random-indexing-dense"})
+    random_dense_models = frozenset({"random-indexing-dense"})
+    transformer_dense_models = frozenset({"sbert-dense"})
+    dense_models = random_dense_models | transformer_dense_models
     hybrid_models = frozenset({"hybrid-sparse-dense"})
     pairwise_models = frozenset({"pairwise-neural-mlp"})
     rag_models = frozenset({"rag-hybrid-judge"})
     graph_models = frozenset({"graph-metadata-aware"})
+    llm_models = frozenset({"llm-e5-large", "llm-e5-cross-reranker"})
 
     pipelines: dict[str, RetrievalPipeline] = {}
     if needs(sparse_models):
@@ -367,15 +381,20 @@ def build_pipeline_registry(
         )
 
     dense_space = None
-    needs_dense_space = needs(dense_models | hybrid_models | pairwise_models | rag_models | graph_models)
-    if needs_dense_space:
+    needs_random_dense_space = needs(random_dense_models | hybrid_models | pairwise_models | rag_models | graph_models)
+    if needs_random_dense_space:
         logger.info("Training shared dense embedding space")
         dense_space = build_dense_embedding_space(index, compute_device=compute_device)
 
     if needs(dense_models):
         logger.info("Building dense semantic pipelines")
         pipelines.update(
-            build_dense_semantic_pipelines(index, dense_space=dense_space, compute_device=compute_device)
+            build_dense_semantic_pipelines(
+                index,
+                dense_space=dense_space,
+                compute_device=compute_device,
+                requested_models=requested_models,
+            )
         )
     if needs(hybrid_models):
         logger.info("Building hybrid sparse-dense pipelines")
@@ -399,6 +418,15 @@ def build_pipeline_registry(
         logger.info("Building graph and metadata aware pipelines")
         pipelines.update(
             build_graph_metadata_pipelines(index, dense_space=dense_space, compute_device=compute_device)
+        )
+    if needs(llm_models):
+        logger.info("Building transformer language-model pipelines")
+        pipelines.update(
+            build_language_model_pipelines(
+                index,
+                compute_device=compute_device,
+                requested_models=requested_models,
+            )
         )
 
     logger.info("Pipeline registry ready: %s", ", ".join(sorted(pipelines)))

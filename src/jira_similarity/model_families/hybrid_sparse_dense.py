@@ -23,9 +23,10 @@ class ReciprocalRankFusionCandidateGenerator(CandidateGenerator):
         *,
         dense_space: DenseEmbeddingSpace,
         compute_device: str = "auto",
-        sparse_weight: float = 0.55,
-        dense_weight: float = 0.45,
-        rank_constant: int = 60,
+        sparse_weight: float = 0.52,
+        dense_weight: float = 0.48,
+        rank_constant: int = 25,
+        score_mix: float = 0.18,
     ):
         self._sparse_generator = SparseScoreCandidateGenerator("bm25_plus")
         self._dense_generator = DenseSemanticCandidateGenerator(
@@ -35,6 +36,7 @@ class ReciprocalRankFusionCandidateGenerator(CandidateGenerator):
         self._sparse_weight = sparse_weight
         self._dense_weight = dense_weight
         self._rank_constant = rank_constant
+        self._score_mix = score_mix
 
     def generate(self, query, index: SearchIndex, *, pool_size: int) -> list[CandidateMatch]:
         logger.debug(
@@ -47,8 +49,8 @@ class ReciprocalRankFusionCandidateGenerator(CandidateGenerator):
         dense_matches = self._dense_generator.generate(query, index, pool_size=pool_size)
 
         fused_scores: Counter[int] = Counter()
-        self._accumulate_rrf(fused_scores, sparse_matches, self._sparse_weight)
-        self._accumulate_rrf(fused_scores, dense_matches, self._dense_weight)
+        self._accumulate_rrf(fused_scores, sparse_matches, self._sparse_weight, source="sparse")
+        self._accumulate_rrf(fused_scores, dense_matches, self._dense_weight, source="dense")
 
         fused_matches = [
             CandidateMatch(issue_id=issue_id, seed_score=score)
@@ -67,9 +69,25 @@ class ReciprocalRankFusionCandidateGenerator(CandidateGenerator):
         fused_scores: Counter[int],
         matches: list[CandidateMatch],
         weight: float,
+        *,
+        source: str,
     ) -> None:
         for rank, match in enumerate(matches, start=1):
             fused_scores[match.issue_id] += weight / (self._rank_constant + rank)
+            fused_scores[match.issue_id] += self._score_mix * self._normalized_source_score(
+                source,
+                match.seed_score,
+            )
+
+    @staticmethod
+    def _normalized_source_score(source: str, raw_score: float) -> float:
+        if raw_score <= 0:
+            if raw_score < 0 and source == "dense":
+                return max(0.0, min(1.0, (raw_score + 1.0) / 2.0))
+            return 0.0
+        if source == "sparse":
+            return raw_score / (raw_score + 8.0)
+        return max(0.0, min(1.0, raw_score))
 
 
 class HybridSparseDenseFeatureExtractor(FeatureExtractor):
@@ -78,7 +96,7 @@ class HybridSparseDenseFeatureExtractor(FeatureExtractor):
 
     def extract(self, query, candidate, index: SearchIndex, *, seed_score: float) -> dict[str, float]:
         feature_scores = self._dense_feature_extractor.extract(query, candidate, index, seed_score=seed_score)
-        feature_scores["rrf_seed"] = round(seed_score, 6)
+        feature_scores["rrf_seed"] = round(max(0.0, min(1.0, seed_score)), 4)
         return feature_scores
 
 
@@ -100,9 +118,10 @@ def build_hybrid_sparse_dense_pipelines(
             feature_extractor=HybridSparseDenseFeatureExtractor(dense_space),
             reranker=WeightedLinearReranker(
                 weights={
-                    "dense_cosine": 0.42,
-                    "bm25_plus": 0.26,
-                    "bm25": 0.08,
+                    "dense_cosine": 0.36,
+                    "bm25_plus": 0.24,
+                    "bm25": 0.10,
+                    "tfidf_cosine": 0.06,
                     "title_ngram": 0.08,
                     "description_overlap": 0.06,
                     "candidate_seed": 0.06,

@@ -90,33 +90,47 @@ class GraphMetadataSpace:
         scores: Counter[int] = Counter()
         if query.project_key and query.project_key in self.project_index:
             for issue_id in self.project_index[query.project_key]:
-                scores[issue_id] += 0.16
+                scores[issue_id] += 0.14
         if query.issue_type and query.issue_type in self.issue_type_index:
             for issue_id in self.issue_type_index[query.issue_type]:
-                scores[issue_id] += 0.08
+                scores[issue_id] += 0.10
         if query.priority and query.priority in self.priority_index:
             for issue_id in self.priority_index[query.priority]:
-                scores[issue_id] += 0.05
+                scores[issue_id] += 0.07
         if query.status and query.status in self.status_index:
             for issue_id in self.status_index[query.status]:
-                scores[issue_id] += 0.04
+                scores[issue_id] += 0.05
         for component in query.component_terms:
             for issue_id in self.component_index.get(component, ()):
-                scores[issue_id] += 0.18
+                scores[issue_id] += 0.20
         for version in query.affected_version_terms:
             for issue_id in self.affected_version_index.get(version, ()):
-                scores[issue_id] += 0.10
+                scores[issue_id] += 0.12
         for version in query.fix_version_terms:
             for issue_id in self.fix_version_index.get(version, ()):
-                scores[issue_id] += 0.10
+                scores[issue_id] += 0.12
+        for issue_id, score in list(scores.items()):
+            scores[issue_id] = min(score, 1.0)
         return scores
 
-    def propagate(self, seed_scores: Counter[int], *, max_seed_nodes: int = 40, decay: float = 0.65) -> Counter[int]:
+    def propagate(
+        self,
+        seed_scores: Counter[int],
+        *,
+        max_seed_nodes: int = 50,
+        decay: float = 0.65,
+        second_hop_decay: float = 0.28,
+    ) -> Counter[int]:
         propagated: Counter[int] = Counter()
         for issue_id, seed_score in seed_scores.most_common(max_seed_nodes):
             propagated[issue_id] += seed_score
             for neighbor_id, edge_weight in self.issue_neighbors.get(issue_id, {}).items():
-                propagated[neighbor_id] += seed_score * edge_weight * decay
+                hop_score = seed_score * edge_weight * decay
+                propagated[neighbor_id] += hop_score
+                for second_neighbor_id, second_edge_weight in self.issue_neighbors.get(neighbor_id, {}).items():
+                    if second_neighbor_id == issue_id:
+                        continue
+                    propagated[second_neighbor_id] += hop_score * second_edge_weight * second_hop_decay
         return propagated
 
     def graph_context_score(self, query, candidate_id: int, index: SearchIndex) -> float:
@@ -143,6 +157,7 @@ class GraphMetadataSpace:
                 prepared_neighbor.fix_version_terms,
             )
             neighbor_support += 0.10 * _binary_match(query.issue_type, prepared_neighbor.issue_type)
+            neighbor_support += 0.12 * jaccard_similarity(query.title_ngrams, prepared_neighbor.title_ngrams)
             support += neighbor_support * edge_weight
             total_weight += edge_weight
 
@@ -170,8 +185,8 @@ class GraphMetadataCandidateGenerator(CandidateGenerator):
         base_matches = self._base_generator.generate(query, index, pool_size=pool_size)
         seed_scores: Counter[int] = Counter()
         for rank, match in enumerate(base_matches, start=1):
-            seed_scores[match.issue_id] += 0.45 / (30 + rank)
-            seed_scores[match.issue_id] += match.seed_score
+            seed_scores[match.issue_id] += 1.0 / (8 + rank)
+            seed_scores[match.issue_id] += min(max(match.seed_score, 0.0), 1.0)
 
         seed_scores.update(self._graph_space.metadata_seed_scores(query))
         propagated = self._graph_space.propagate(seed_scores)
@@ -246,14 +261,14 @@ class GraphMetadataFeatureExtractor(FeatureExtractor):
 class GraphMetadataReranker(Reranker):
     def rerank(self, feature_scores: dict[str, float]) -> RerankResult:
         score = (
-            (0.18 * feature_scores.get("bm25_plus", 0.0))
+            (0.16 * feature_scores.get("bm25_plus", 0.0))
             + (0.16 * feature_scores.get("dense_cosine", 0.0))
-            + (0.18 * feature_scores.get("metadata_alignment", 0.0))
-            + (0.16 * feature_scores.get("graph_context", 0.0))
-            + (0.10 * feature_scores.get("graph_seed", 0.0))
+            + (0.20 * feature_scores.get("metadata_alignment", 0.0))
+            + (0.20 * feature_scores.get("graph_context", 0.0))
+            + (0.08 * feature_scores.get("graph_seed", 0.0))
             + (0.08 * feature_scores.get("title_ngram", 0.0))
             + (0.06 * feature_scores.get("description_overlap", 0.0))
-            + (0.08 * feature_scores.get("component_overlap", 0.0))
+            + (0.06 * feature_scores.get("component_overlap", 0.0))
         )
         score = max(0.0, min(1.0, score))
         reasons = self._build_reasons(feature_scores)

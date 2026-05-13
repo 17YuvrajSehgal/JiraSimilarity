@@ -17,6 +17,8 @@ dependencies = []
 mysql = ["PyMySQL"]
 api = ["fastapi", "uvicorn"]
 gpu = ["torch>=2.2"]
+llm = ["sentence-transformers>=3.0", "transformers>=4.41"]
+viz = ["matplotlib>=3.9"]
 
 [project.scripts]
 jira-similarity = "jira_similarity.cli:main"

@@ -175,6 +175,12 @@ class JiraSimilarityEngine:
             for model_name in resolved_model_names
             if model_name in self._pipelines
         }
+        for model_name in resolved_model_names:
+            if model_name not in self._pipelines:
+                logger.warning(
+                    "compare_models: requested model '%s' is registered but unavailable in this runtime; skipping.",
+                    model_name,
+                )
         logger.debug("compare_models: done, returned results for %s models", len(results))
         return results
 
@@ -203,6 +209,10 @@ class JiraSimilarityEngine:
         reports: list[ModelEvaluation] = []
         for model_name in resolve_model_names(model_names):
             if model_name not in self._pipelines:
+                logger.warning(
+                    "evaluate: requested model '%s' is registered but unavailable in this runtime; skipping.",
+                    model_name,
+                )
                 continue
             logger.info("Evaluating model=%s task=%s queries=%s", model_name, task, len(query_ids))
             reciprocal_ranks: list[float] = []
@@ -342,6 +352,12 @@ class JiraSimilarityEngine:
         try:
             return self._pipelines[model_name]
         except KeyError as exc:
+            if model_name in self._model_catalog:
+                raise ValueError(
+                    f"Model '{model_name}' is registered but not available in this runtime. "
+                    "It may require optional dependencies (for example sentence-transformers) "
+                    "or model-specific runtime configuration."
+                ) from exc
             available = ", ".join(sorted(self._model_catalog))
             raise ValueError(f"Unknown model '{model_name}'. Available models: {available}") from exc
 

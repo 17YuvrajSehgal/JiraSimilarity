@@ -1,98 +1,136 @@
-# Comparative Benchmark Analysis (Latest Synthetic Run)
+# Comparative Benchmark Analysis (Updated with 2026-04-22/23 Runs)
 
-This report compares model performance from the latest benchmark outputs:
+This update uses the latest benchmark outputs:
 
-- `results/benchmark/2026-04-22_01-26-47_ad-hoc.json` (task: `similarity`)
-- `results/benchmark/2026-04-22_01-28-14_ad-hoc.json` (task: `duplicates`)
+- `results/benchmark/2026-04-22_23-56-55_similarity_ad-hoc.json` (task: `similarity`)
+- `results/benchmark/2026-04-23_00-02-39_duplicate_ad-hoc.json` (task: `duplicates`)
 
-Dataset context:
+Previous comparison baseline (from the earlier report revision):
+
+- `results/benchmark/2026-04-22_22-52-06_ad-hoc.json` (similarity)
+- `results/benchmark/2026-04-22_22-55-11_ad-hoc.json` (duplicates)
+
+Run context:
 
 - Source: `datasets/synthetic/synthetic_jira_issues.json`
-- Sample size requested: `100`
+- Requested models: 13
+- Evaluated models: 13
+- `sample_size=100`
 - Queries evaluated: `90` (similarity), `60` (duplicates)
-- Top-k: `1, 3, 5, 10`
+- `top_k_values = [1, 3, 5, 10]`
 
-## Executive summary
+## Improvement check (short answer)
 
-1. `logreg-engineered` is the strongest overall model in this run across both tasks.
-2. `pairwise-neural-mlp` is now competitive and no longer collapsed to zero, but it has threshold calibration issues in duplicate mode.
-3. `graph-metadata-aware` is a strong, stable alternative with excellent recall and hit-rate.
-4. Sparse baselines (`bm25`, `tfidf-cosine`, `lexical`) remain reliable and competitive, especially in duplicate retrieval coverage.
-5. `random-indexing-dense` remains weakest overall in this synthetic setting.
+Overall, **no**.  
+The latest run shows a major regression in supervised rerankers (`logreg-engineered`, `pairwise-neural-mlp`).  
+Graph/lexical/LLM families are mostly stable, with a few small improvements.
 
-## Similarity task comparison
+## Executive summary (k=5 and k=10)
 
-Sorted by `MAP@10` (higher is better):
+1. `graph-metadata-aware` is now the strongest similarity model at both `k=5` and `k=10`.
+2. For duplicates, `tfidf-cosine`/`bm25` are strongest at `k=5`, while `llm-e5-large` is best at `k=10`.
+3. `sbert-dense` was added successfully and is competitive mid-tier, but not top-ranked yet.
+4. `logreg-engineered` and `pairwise-neural-mlp` regressed sharply and are currently underperforming.
 
-| Rank | Model | MRR | MAP@10 | Recall@10 | NDCG@10 | Hit@10 |
-|---|---|---:|---:|---:|---:|---:|
-| 1 | logreg-engineered | 0.4977 | 0.3982 | 0.9020 | 0.5703 | 1.0000 |
-| 2 | pairwise-neural-mlp | 0.4123 | 0.3051 | 0.7313 | 0.4533 | 0.9778 |
-| 3 | graph-metadata-aware | 0.2655 | 0.2358 | 0.8483 | 0.4186 | 1.0000 |
-| 4 | tfidf-cosine | 0.2410 | 0.1766 | 0.7233 | 0.3450 | 0.9778 |
-| 5 | bm25 | 0.2467 | 0.1640 | 0.6544 | 0.3209 | 0.9556 |
-| 6 | rag-hybrid-judge | 0.2410 | 0.1602 | 0.6807 | 0.3254 | 0.9889 |
-| 7 | lexical | 0.2356 | 0.1594 | 0.6544 | 0.3161 | 0.9556 |
-| 8 | bm25-plus | 0.2123 | 0.1533 | 0.6789 | 0.3135 | 0.9444 |
-| 9 | hybrid-sparse-dense | 0.2489 | 0.1511 | 0.6030 | 0.3022 | 0.9778 |
-| 10 | random-indexing-dense | 0.2023 | 0.1107 | 0.5446 | 0.2524 | 0.9778 |
+---
 
-Key takeaways:
+## Similarity task (latest)
 
-- `logreg-engineered` leads clearly on ranking quality (`MRR`, `MAP@10`, `NDCG@10`).
-- `pairwise-neural-mlp` is second best and materially better than hybrid/sparse baselines on ranking metrics.
-- `graph-metadata-aware` provides very strong recall and perfect `Hit@10` while maintaining good ranking quality.
+### Top models at k=5 (ranked by MAP@5)
 
-## Duplicates task comparison
+| Rank | Model | MAP@5 | Recall@5 | NDCG@5 | Hit@5 |
+|---|---|---:|---:|---:|---:|
+| 1 | graph-metadata-aware | 0.1441 | 0.4822 | 0.2721 | 0.9222 |
+| 2 | tfidf-cosine | 0.1147 | 0.4239 | 0.2290 | 0.8222 |
+| 3 | llm-e5-cross-reranker | 0.1145 | 0.4041 | 0.2263 | 0.8111 |
+| 4 | bm25-plus | 0.1115 | 0.4128 | 0.2212 | 0.7778 |
+| 5 | lexical | 0.1112 | 0.4072 | 0.2194 | 0.7667 |
+| 6 | bm25 | 0.1100 | 0.4128 | 0.2207 | 0.7889 |
 
-Sorted by `MAP@10`:
+### Top models at k=10 (ranked by MAP@10)
 
-| Rank | Model | MRR | MAP@10 | Recall@10 | NDCG@10 | Hit@10 | Best F1 (threshold) |
-|---|---|---:|---:|---:|---:|---:|---:|
-| 1 | logreg-engineered | 0.2860 | 0.2860 | 0.9833 | 0.4506 | 0.9833 | 0.1948 (0.45) |
-| 2 | pairwise-neural-mlp | 0.2814 | 0.2814 | 0.8833 | 0.4220 | 0.8833 | 0.0000 (none at 0.45/0.55/0.65) |
-| 3 | bm25 | 0.2213 | 0.2213 | 1.0000 | 0.4030 | 1.0000 | 0.1818 (0.45/0.55/0.65) |
-| 4 | tfidf-cosine | 0.2211 | 0.2211 | 1.0000 | 0.4031 | 1.0000 | 0.0662 (0.45) |
-| 5 | hybrid-sparse-dense | 0.2172 | 0.2172 | 0.9833 | 0.3954 | 0.9833 | 0.1943 (0.55) |
-| 6 | graph-metadata-aware | 0.2170 | 0.2170 | 1.0000 | 0.4006 | 1.0000 | 0.1863 (0.65) |
-| 7 | lexical | 0.2162 | 0.2162 | 1.0000 | 0.3985 | 1.0000 | 0.1818 (0.45/0.55/0.65) |
-| 8 | rag-hybrid-judge | 0.2075 | 0.2075 | 0.9833 | 0.3872 | 0.9833 | 0.1788 (0.45/0.55/0.65) |
-| 9 | bm25-plus | 0.1922 | 0.1922 | 1.0000 | 0.3793 | 1.0000 | 0.1818 (0.45/0.55/0.65) |
-| 10 | random-indexing-dense | 0.1695 | 0.1695 | 0.9833 | 0.3519 | 0.9833 | 0.1830 (0.45) |
+| Rank | Model | MAP@10 | Recall@10 | NDCG@10 | Hit@10 |
+|---|---|---:|---:|---:|---:|
+| 1 | graph-metadata-aware | 0.2388 | 0.8539 | 0.4227 | 1.0000 |
+| 2 | tfidf-cosine | 0.1722 | 0.6974 | 0.3350 | 0.9556 |
+| 3 | llm-e5-large | 0.1719 | 0.7150 | 0.3410 | 0.9667 |
+| 4 | llm-e5-cross-reranker | 0.1696 | 0.6733 | 0.3322 | 1.0000 |
+| 5 | rag-hybrid-judge | 0.1659 | 0.7030 | 0.3344 | 0.9889 |
+| 6 | lexical | 0.1648 | 0.6789 | 0.3241 | 0.9556 |
 
-Key takeaways:
+---
 
-- `logreg-engineered` and `pairwise-neural-mlp` now lead ranking metrics for duplicate retrieval.
-- `pairwise-neural-mlp` shows strong rank metrics but poor threshold behavior at current cutoffs (all F1 = 0 at `0.45/0.55/0.65`), indicating score calibration mismatch.
-- Several models (`bm25`, `graph-metadata-aware`, `lexical`) achieve perfect `Recall@10` and `Hit@10`, making them strong retrieval-first choices.
+## Duplicates task (latest)
 
-## Cross-task overall ranking
+### Top models at k=5 (ranked by MAP@5)
 
-Using normalized aggregate score across both tasks and metrics (`MRR`, `MAP@10`, `Recall@10`, `NDCG@10`, `Hit@10`):
+| Rank | Model | MAP@5 | Recall@5 | NDCG@5 | Hit@5 |
+|---|---|---:|---:|---:|---:|
+| 1 | tfidf-cosine | 0.2067 | 0.9000 | 0.3698 | 0.9000 |
+| 2 | bm25 | 0.2056 | 0.8833 | 0.3652 | 0.8833 |
+| 3 | bm25-plus | 0.1992 | 0.8667 | 0.3561 | 0.8667 |
+| 4 | llm-e5-large | 0.1989 | 0.8167 | 0.3449 | 0.8167 |
+| 5 | lexical | 0.1942 | 0.8500 | 0.3482 | 0.8500 |
+| 6 | graph-metadata-aware | 0.1925 | 0.8000 | 0.3372 | 0.8000 |
 
-1. `logreg-engineered` (9.714)
-2. `graph-metadata-aware` (6.330)
-3. `pairwise-neural-mlp` (5.772)
-4. `tfidf-cosine` (5.156)
-5. `bm25` (4.466)
-6. `rag-hybrid-judge` (4.438)
-7. `lexical` (4.263)
-8. `hybrid-sparse-dense` (4.193)
-9. `bm25-plus` (3.418)
-10. `random-indexing-dense` (2.314)
+### Top models at k=10 (ranked by MAP@10)
 
-## What to improve next
+| Rank | Model | MAP@10 | Recall@10 | NDCG@10 | Hit@10 |
+|---|---|---:|---:|---:|---:|
+| 1 | llm-e5-large | 0.2255 | 1.0000 | 0.4063 | 1.0000 |
+| 2 | graph-metadata-aware | 0.2215 | 1.0000 | 0.4042 | 1.0000 |
+| 3 | bm25 | 0.2215 | 1.0000 | 0.4033 | 1.0000 |
+| 4 | tfidf-cosine | 0.2203 | 1.0000 | 0.4024 | 1.0000 |
+| 5 | llm-e5-cross-reranker | 0.2196 | 1.0000 | 0.4010 | 1.0000 |
+| 6 | bm25-plus | 0.2176 | 1.0000 | 0.3999 | 1.0000 |
 
-1. Calibrate duplicate thresholds per model, not fixed global values.
-- Especially for `pairwise-neural-mlp`, sweep thresholds below `0.45` (for example `0.05` to `0.45`) and pick threshold by best validation F1.
+---
 
-2. Add score calibration for supervised duplicate models.
-- Apply Platt scaling or isotonic calibration for `logreg-engineered` and `pairwise-neural-mlp` before thresholding.
+## Change vs previous run (k=5 and k=10 MAP)
 
-3. Keep two deployment profiles.
-- Retrieval-first: `graph-metadata-aware` or `bm25` (high `Recall@10`/`Hit@10`).
-- Ranking-quality-first: `logreg-engineered` (best overall rank quality in this synthetic run).
+### Similarity deltas
 
-4. Stress-test generalization.
-- Repeat with multiple random seeds and larger synthetic sets to check metric stability.
-- Confirm trends on real Jira data before final model decisions.
+| Model | MAP@5 (old -> new) | Delta | MAP@10 (old -> new) | Delta |
+|---|---:|---:|---:|---:|
+| logreg-engineered | 0.3180 -> 0.0006 | **-0.3174** | 0.3982 -> 0.0013 | **-0.3969** |
+| pairwise-neural-mlp | 0.2479 -> 0.1053 | **-0.1426** | 0.3051 -> 0.1392 | **-0.1659** |
+| graph-metadata-aware | 0.1456 -> 0.1441 | -0.0015 | 0.2358 -> 0.2388 | **+0.0030** |
+| tfidf-cosine | 0.1175 -> 0.1147 | -0.0028 | 0.1766 -> 0.1722 | -0.0044 |
+| llm-e5-large | n/a -> 0.1088 | n/a | 0.1719 -> 0.1719 | ~0.0000 |
+| llm-e5-cross-reranker | 0.1145 -> 0.1145 | ~0.0000 | 0.1696 -> 0.1696 | ~0.0000 |
+
+### Duplicates deltas
+
+| Model | MAP@5 (old -> new) | Delta | MAP@10 (old -> new) | Delta |
+|---|---:|---:|---:|---:|
+| logreg-engineered | 0.2428 -> 0.0000 | **-0.2428** | 0.2860 -> 0.0021 | **-0.2839** |
+| pairwise-neural-mlp | 0.2453 -> 0.0172 | **-0.2281** | 0.2814 -> 0.0410 | **-0.2404** |
+| bm25 | 0.1875 -> 0.2056 | **+0.0181** | 0.2213 -> 0.2215 | +0.0002 |
+| tfidf-cosine | 0.2100 -> 0.2067 | -0.0033 | 0.2211 -> 0.2203 | -0.0008 |
+| graph-metadata-aware | 0.1900 -> 0.1925 | **+0.0025** | n/a -> 0.2215 | n/a |
+| llm-e5-large | 0.1989 -> 0.1989 | ~0.0000 | 0.2255 -> 0.2255 | ~0.0000 |
+| llm-e5-cross-reranker | n/a -> 0.1856 | n/a | 0.2196 -> 0.2196 | ~0.0000 |
+
+---
+
+## Interpretation
+
+1. The model-family upgrades did not produce a net gain in this run because the supervised rerankers regressed heavily.
+2. Non-supervised families are stable and in several cases improved slightly (`graph-metadata-aware`, `bm25` on duplicates@5).
+3. LLM baselines (`llm-e5-large`, `llm-e5-cross-reranker`) are stable and currently among the most reliable top performers.
+4. `sbert-dense` is functional but currently below `llm-e5-large` and leading lexical/graph models on this synthetic dataset.
+
+## Likely cause of regression
+
+The timing of the drop aligns with recent trainer changes in:
+
+- `logreg-engineered`
+- `pairwise-neural-mlp`
+
+Given both collapsed together, this is likely a training-distribution/calibration issue (negative sampling, class weighting, or scoring calibration), not a retrieval-index issue.
+
+## Recommended next steps
+
+1. Revert supervised trainers to the last known-good hyperparameters and re-run.
+2. Then re-introduce new trainer changes one block at a time (ablation style) to isolate the breaking change.
+3. Keep `graph-metadata-aware` + `llm-e5-large` as temporary primary baselines until supervised regressions are fixed.

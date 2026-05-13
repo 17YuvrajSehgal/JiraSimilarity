@@ -17,6 +17,12 @@ from ..pipeline import (
 logger = logging.getLogger(__name__)
 
 
+def _normalize_sparse_score(value: float) -> float:
+    if value <= 0:
+        return 0.0
+    return value / (value + 8.0)
+
+
 class SparseScoreCandidateGenerator(CandidateGenerator):
     def __init__(self, score_name: str):
         self._score_name = score_name
@@ -70,7 +76,7 @@ class SparseScoreCandidateGenerator(CandidateGenerator):
 class SparseLexicalFeatureExtractor(StandardFeatureExtractor):
     def extract(self, query, candidate, index: SearchIndex, *, seed_score: float) -> dict[str, float]:
         feature_scores = super().extract(query, candidate, index, seed_score=seed_score)
-        feature_scores["bm25_plus"] = round(index.bm25_plus(query, candidate), 4)
+        feature_scores["bm25_plus"] = round(_normalize_sparse_score(index.bm25_plus(query, candidate)), 4)
         feature_scores["tfidf_cosine"] = round(index.tfidf_cosine(query, candidate), 4)
         return feature_scores
 
@@ -85,8 +91,10 @@ def build_sparse_lexical_pipelines() -> dict[str, RetrievalPipeline]:
         feature_extractor=sparse_feature_extractor,
         reranker=WeightedLinearReranker(
             weights={
-                "bm25": 0.86,
-                "title_ngram": 0.14,
+                "bm25": 0.70,
+                "bm25_plus": 0.12,
+                "title_ngram": 0.10,
+                "description_overlap": 0.08,
             }
         ),
     )
@@ -97,9 +105,11 @@ def build_sparse_lexical_pipelines() -> dict[str, RetrievalPipeline]:
         feature_extractor=sparse_feature_extractor,
         reranker=WeightedLinearReranker(
             weights={
-                "bm25_plus": 0.80,
-                "bm25": 0.10,
-                "title_ngram": 0.10,
+                "bm25_plus": 0.62,
+                "bm25": 0.18,
+                "tfidf_cosine": 0.10,
+                "title_ngram": 0.06,
+                "description_overlap": 0.04,
             }
         ),
     )
@@ -110,9 +120,11 @@ def build_sparse_lexical_pipelines() -> dict[str, RetrievalPipeline]:
         feature_extractor=sparse_feature_extractor,
         reranker=WeightedLinearReranker(
             weights={
-                "tfidf_cosine": 0.82,
-                "title_ngram": 0.10,
-                "description_overlap": 0.08,
+                "tfidf_cosine": 0.62,
+                "bm25_plus": 0.18,
+                "bm25": 0.10,
+                "title_ngram": 0.06,
+                "description_overlap": 0.04,
             }
         ),
     )
@@ -123,8 +135,11 @@ def build_sparse_lexical_pipelines() -> dict[str, RetrievalPipeline]:
         feature_extractor=sparse_feature_extractor,
         reranker=WeightedLinearReranker(
             weights={
-                "bm25": 0.88,
-                "title_ngram": 0.12,
+                "bm25": 0.62,
+                "bm25_plus": 0.18,
+                "tfidf_cosine": 0.10,
+                "title_ngram": 0.06,
+                "description_overlap": 0.04,
             }
         ),
     )

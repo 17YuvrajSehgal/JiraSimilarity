@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 from typing import Iterable
 
 from .benchmarking import BenchmarkRunner, build_benchmark_suites
@@ -21,6 +22,11 @@ def main() -> int:
     args = parser.parse_args()
     configure_logging(args.log_level)
     logger.info("CLI command started: command=%s log_level=%s", args.command, args.log_level)
+    os.environ["JIRA_RESULTS_DIR"] = args.results_dir
+    if args.disable_training_diagnostics:
+        os.environ["JIRA_TRAINING_DIAGNOSTICS"] = "0"
+    else:
+        os.environ.setdefault("JIRA_TRAINING_DIAGNOSTICS", "1")
 
     if args.command == "models":
         catalog = build_model_catalog()
@@ -217,6 +223,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-save",
         action="store_true",
         help="Disable saving results to disk (print only).",
+    )
+    parser.add_argument(
+        "--disable-training-diagnostics",
+        action="store_true",
+        help=(
+            "Disable per-epoch train/validation/test training diagnostics logs and plots "
+            "(enabled by default)."
+        ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 

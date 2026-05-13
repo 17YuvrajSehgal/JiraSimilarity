@@ -11,10 +11,13 @@ GPU_ACCELERATED_MODELS = frozenset(
     {
         "logreg-engineered",
         "random-indexing-dense",
+        "sbert-dense",
         "hybrid-sparse-dense",
         "pairwise-neural-mlp",
         "rag-hybrid-judge",
         "graph-metadata-aware",
+        "llm-e5-large",
+        "llm-e5-cross-reranker",
     }
 )
 
@@ -90,6 +93,15 @@ def build_model_catalog() -> dict[str, ModelSpec]:
             strengths=("dense local embeddings", "captures some co-occurrence semantics", "no external ML dependency"),
             limitations=("weaker than transformer encoders", "still an early dense baseline"),
         ),
+        "sbert-dense": ModelSpec(
+            name="sbert-dense",
+            family="dense_semantic_embeddings",
+            stage="retrieval",
+            runnable=True,
+            description="Sentence-transformer SBERT dense retrieval baseline with cosine candidate ranking.",
+            strengths=("strong semantic retrieval", "robust to paraphrases", "optional CUDA acceleration"),
+            limitations=("requires optional sentence-transformers dependency", "higher compute/memory cost"),
+        ),
         "hybrid-sparse-dense": ModelSpec(
             name="hybrid-sparse-dense",
             family="hybrid_sparse_dense_retrieval",
@@ -125,6 +137,24 @@ def build_model_catalog() -> dict[str, ModelSpec]:
             description="Graph- and metadata-aware retrieval using explicit issue links plus metadata propagation.",
             strengths=("uses issue graph structure", "leverages Jira metadata strongly", "captures subsystem context"),
             limitations=("graph quality depends on available links and metadata", "heavier than non-graph baselines"),
+        ),
+        "llm-e5-large": ModelSpec(
+            name="llm-e5-large",
+            family="llm_embedding_retrieval",
+            stage="retrieval",
+            runnable=True,
+            description="Sentence-transformer retrieval using E5-large embeddings with cosine candidate ranking.",
+            strengths=("strong semantic retrieval", "robust on paraphrases", "GPU-accelerated embedding scoring"),
+            limitations=("requires optional sentence-transformers dependency", "higher compute cost than sparse baselines"),
+        ),
+        "llm-e5-cross-reranker": ModelSpec(
+            name="llm-e5-cross-reranker",
+            family="llm_cross_encoder_reranking",
+            stage="classification",
+            runnable=True,
+            description="E5 retrieval with BGE cross-encoder reranking for high-precision duplicate scoring.",
+            strengths=("strong pairwise semantic judgments", "better duplicate precision than retrieval-only models"),
+            limitations=("slower than bi-encoder retrieval", "requires optional sentence-transformers dependency"),
         ),
     }
 
